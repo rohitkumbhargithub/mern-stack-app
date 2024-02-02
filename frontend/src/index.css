@@ -4,6 +4,7 @@
 
 body{
     background: url('https://img.freepik.com/premium-vector/seamless-pattern-with-colorful-outline-bubble-speech-black-background_197792-6748.jpg');
+	background-size: cover;
 }
 
 /* dark mode looking scrollbar */
