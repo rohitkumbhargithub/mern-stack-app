@@ -1,20 +1,30 @@
 import React, { useState } from 'react'
 import GenderCheck from './GenderCheck';
 import { Link } from 'react-router-dom';
+import userSignup from '../../hooks/userSignup';
+
+
 
 const Signup = () => {
 
     const [inputs, setInputs] = useState({
-        name: '',
-        email: '',
-        password: '',
-        confrimPassword: '',
-        gender: ''
+        name: "",
+        email: "",
+        password: "",
+        confirmPassword: "",
+        gender: "",
     });
 
-    const handleSubmit = (e) => {
+    const {loading, signup} = userSignup();
+
+    const handleCheckBoxChange = (gender) => {
+        setInputs({ ...inputs, gender });
+    }
+
+    const handleSubmit = async(e) => {
         e.preventDefault();
-        console.log(inputs);
+        await signup(inputs);
+        // console.log(inputs);
     }
 
 
@@ -58,18 +68,22 @@ const Signup = () => {
                         <span className='text-base label-text'>Confrim Password</span>
                     </label>
                     <input type="password" placeholder="Type Confrim Password " className="input input-bordered input-info w-full max-w-xs" 
-                        value={inputs.confrimPassword}
-                        onChange={(e) => setInputs({...inputs, confrimPassword: e.target.value})}
+                        value={inputs.confirmPassword}
+                        onChange={(e) => setInputs({...inputs, confirmPassword: e.target.value})}
                     />
                 </div>
 
                 {/* Gender checkBox */}
-                <GenderCheck/>
+                <GenderCheck onCheckboxChange={handleCheckBoxChange} selectedGender={inputs.gender}/>
                 <Link to="/login" className='text-sm hover:underline hover: text-blue-500 mt-2 inline-block'>
                     Already have an account?
                 </Link>
-
-                <div className='btn btn-block btn-sm mt-3'>Sign Up</div>
+                <div>
+                    <button className='btn btn-block btn-sm mt-3'
+                        disabled={loading}
+                    >{loading ? <span className='loading loading-spinner'></span> : "Sign Up"}
+                    </button>
+                </div>
             </form>
          </div>
     </div>
