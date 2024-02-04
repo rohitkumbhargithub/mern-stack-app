@@ -12,8 +12,8 @@ const MessageInput = () => {
     e.preventDefault();
 
     if(!message) return;
-    
     await sendMessage(message);
+    // console.log(message);
     setMessage("");
   }
 
@@ -28,7 +28,7 @@ const MessageInput = () => {
              
              />
              <button type='submit' className='absolute inset-y-0 end-0 flex items-center pe-3'>
-               {loading ? <span className='loading loading-dots'></span> : <AiOutlineSend /> } 
+               {loading ? <span className='loading loading-dot'></span> : <AiOutlineSend />}
              </button>
         </div>
     </form>

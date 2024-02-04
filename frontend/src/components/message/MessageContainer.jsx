@@ -1,15 +1,15 @@
-import useConverstion from '../../zustand/useConverstion';
 import Messages from './Messages';
 import MessageInput from './MessageInput';
 import {TiMessages} from 'react-icons/ti';
 import { useEffect } from 'react';
+import useConverstion from '../../zustand/useConverstion';
 
 const MessageContainer = () => {
     const {selectedConverstion, setSelectedConverstion} = useConverstion();
 
     useEffect(() => {
 
-      // cleanup function (unmounts)
+      // cleanup function unmount
 
       return () => setSelectedConverstion(null);
     }, [setSelectedConverstion]);

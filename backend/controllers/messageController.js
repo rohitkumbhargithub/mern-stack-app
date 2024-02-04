@@ -1,4 +1,4 @@
-const Converstion = require("../models/consverstions");
+const Converastion = require("../models/converastions");
 const Message = require("../models/messages");
 
 
@@ -9,15 +9,15 @@ exports.sendMessage = async (req, res) => {
         const { id: recieverId } = req.params;
         const senderId = req.user._id;
 
-        let consverstions = await Converstion.findOne({
-            participate: {
+        let consverastions = await Converastion.findOne({
+            participated: {
                 $all : [senderId, recieverId]
             },
         });
 
-        if(!consverstions){
-            consverstions = await Converstion.create({
-                participate: [senderId, recieverId],
+        if(!consverastions){
+            consverastions = await Converastion.create({
+                participated: [senderId, recieverId],
             });
         }
 
@@ -28,7 +28,7 @@ exports.sendMessage = async (req, res) => {
         })
 
         if(newMessage){
-            consverstions.message.push(newMessage._id);
+            consverastions.messages.push(newMessage._id);
         }
 
         // socket fuctionality will go here
@@ -36,12 +36,12 @@ exports.sendMessage = async (req, res) => {
         // await consverstions.save();
         // await newMessage.save();
 
-        await Promise.all([consverstions.save(), newMessage.save()]);
+        await Promise.all([consverastions.save(), newMessage.save()]);
 
         res.status(200).json(newMessage);
 
     }catch(err){
-        console.log('send Message ', err);
+        // console.log('send Message ', err);
         res.status(500).json({err: "Internal server error"});
     }
 }
@@ -54,14 +54,14 @@ exports.getMessage = async (req, res, next) => {
         const { id: userToChatId } = req.params;
         const senderId = req.user._id;
 
-        const consverstions = await Converstion.findOne({
-            participate: { $all: [senderId, userToChatId] },
-        }).populate("message");
+        const consverastions = await Converastion.findOne({
+            participated: { $all: [senderId, userToChatId] },
+        }).populate("messages");
 
 
-        if(!consverstions) return  res.status(200).json([]);
+        if(!consverastions) return  res.status(200).json([]);
 
-        const message = consverstions.message
+        const message = consverastions.messages
         res.status(200).json(message);
 
     }catch(err){

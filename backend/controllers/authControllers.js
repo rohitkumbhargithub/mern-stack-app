@@ -1,4 +1,4 @@
-const bcrypt = require("bcryptjs/dist/bcrypt");
+const bcrypt = require('bcryptjs');
 const User = require("../models/users");
 const jwt = require('../utils/jwtToken');
 
@@ -6,8 +6,8 @@ const jwt = require('../utils/jwtToken');
 exports.singup = async (req, res) => {
     const {name, email, password, confirmPassword, gender} = req.body;
     try{
-            if(password != confirmPassword){
-            return res.status(400).json({error: "password not match"});
+        if(password !== confirmPassword){
+            return res.status(400).json({error: "password not matches"});
         }
         
         const user = await User.findOne({email});
@@ -61,7 +61,7 @@ exports.login = async (req, res) => {
         const isPassword = await bcrypt.compare(password, user?.password || '');
 
         if(!user || !isPassword){
-            return res.status(403).json({err: "Invalid username or password"});
+            return res.status(400).json({err: "Invalid username or password"});
         }
 
         jwt(user._id, res);
@@ -69,11 +69,12 @@ exports.login = async (req, res) => {
         res.status(200).json({
             _id: user._id,
             email: user.email,
+            name: user.name,
             profile: user.profile
         });
 
     }catch(err){
-        console.log('signup ', err);
+        console.log('login ', err);
         return res.status(500).json({err: "Internal server error"});
     }
 }
