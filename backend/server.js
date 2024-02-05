@@ -1,4 +1,5 @@
 const express = require('express');
+const path = require('path');
 const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 const PORT = process.env.PORT || 8000;
@@ -8,6 +9,8 @@ const userRoutes = require('./routes/userRoutes');
 const connectToDb = require('./db/mongoose');
 const { app, server } = require('./socket/socket');
 
+const __variableOfChoice = path.resolve()
+
 dotenv.config();
 app.use(express.json());
 app.use(cookieParser());
@@ -16,9 +19,11 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/users', userRoutes);
 
-// app.get('/', (req, res)=> {
-//     res.send("Hello World");
-// })
+app.use(express.static(path.join(__variableOfChoice,"/frontend/dist")));
+
+app.get("*", (req, res) => {
+    res.sendFile(path.join(__variableOfChoice, "frontend", "dist", "index.html"));
+})
 
 
 server.listen(PORT, ()=> {
