@@ -10,9 +10,16 @@ exports.getUsersSildeBar = async (req, res, next) => {
             participated: { $in: [loggedInUserId] },
             isGroupChat: { $ne: true },
             messages: { $not: { $size: 0 } }
-        }).populate("participated", "-password").sort({ updatedAt: -1 });
+        })
+        .populate("participated", "-password")
+        .populate({
+            path: "messages",
+            options: { sort: { createdAt: -1 }, limit: 1 }
+        })
+        .sort({ updatedAt: -1 });
 
         const sidebarData = conversations.map(conv => {
+            const lastMsg = conv.messages[0]; // Since we sorted -1 and limited to 1
             if (conv.isGroupChat) {
                 return {
                     _id: conv._id,
@@ -20,17 +27,21 @@ exports.getUsersSildeBar = async (req, res, next) => {
                     isGroupChat: true,
                     profile: conv.groupAvatar,
                     type: "group",
-                    participants: conv.participated
+                    participants: conv.participated,
+                    lastMessage: lastMsg?.message || lastMsg?.body || "",
+                    lastMessageTime: lastMsg?.createdAt || ""
                 };
             } else {
                 const otherUser = conv.participated.find(u => u._id.toString() !== loggedInUserId.toString());
                 if (!otherUser) return null;
                 return {
                     ...otherUser.toObject(),
-                    _id: conv._id, // USE CONVERSATION ID HERE
-                    userId: otherUser._id, // KEEP USER ID SEPARATELY
+                    _id: conv._id,
+                    userId: otherUser._id,
                     isGroupChat: false,
-                    type: "user"
+                    type: "user",
+                    lastMessage: lastMsg?.message || lastMsg?.body || "",
+                    lastMessageTime: lastMsg?.createdAt || ""
                 };
             }
         }).filter(item => item !== null);

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { toast } from "sonner";
-import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2, MessageCircle, Trash2, Pencil, Reply, Forward, MoreVertical } from "lucide-react";
+import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2, MessageCircle, Trash2, Pencil, Reply, Forward, MoreVertical, ArrowLeft } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "✅"];
+
+import useConverstion from "../../zustand/useConverstion";
 
 export function ConversationView({
   conversationId,
@@ -23,6 +25,7 @@ export function ConversationView({
   onReplyMessage,
   onForwardMessage
 }) {
+  const { setSelectedConverstion } = useConverstion();
   const me = String(currentUser?._id || currentUser?.id || "");
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
@@ -96,6 +99,12 @@ export function ConversationView({
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2.5 shadow-sm">
         <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setSelectedConverstion(null)}
+            className="sm:hidden -ml-2 p-2 hover:bg-muted rounded-full transition-colors"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
           <div className="relative">
             {otherMember?.profile || otherMember?.profilePic ? (
               <img src={otherMember.profile || otherMember.profilePic} className="h-9 w-9 rounded-full object-cover border border-border/50" alt="" />

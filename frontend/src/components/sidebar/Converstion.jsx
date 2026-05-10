@@ -7,7 +7,7 @@ const Converstion = ({ converstion }) => {
     const { selectedConverstion, setSelectedConverstion } = useConverstion();
     const isSelected = selectedConverstion?._id === converstion._id;
     const { onlineUsers } = useSocketContext();
-    const isOnline = onlineUsers.includes(converstion._id);
+    const isOnline = onlineUsers.includes(converstion.userId || converstion._id);
 
     console.log(converstion.name, "from trst");
 
@@ -43,6 +43,13 @@ const Converstion = ({ converstion }) => {
             <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
                     <span className={`truncate text-sm ${isSelected ? "font-bold" : "font-medium"}`}>{name}</span>
+                    <span className="shrink-0 text-[10px] opacity-50">
+                        {isOnline ? (
+                            <span className="text-primary font-bold">Online</span>
+                        ) : (
+                            converstion.lastMessageTime && new Date(converstion.lastMessageTime).toLocaleDateString([], { hour: '2-digit', minute: '2-digit' }).split(',')[1] || ""
+                        )}
+                    </span>
                 </div>
                 <div className="flex items-center gap-2">
                     <span className="line-clamp-1 flex-1 text-xs opacity-70">
