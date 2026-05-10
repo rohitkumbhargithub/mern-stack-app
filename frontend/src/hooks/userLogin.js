@@ -17,10 +17,14 @@ const userLogin = () => {
 				body: JSON.stringify({ email, password }),
 			});
 
-			const data = await response.json();
-			if (data.err) {
-				throw new Error(data.err);
+			// Safely parse the response - body may be empty or non-JSON
+			const text = await response.text();
+			const data = text ? JSON.parse(text) : {};
+
+			if (!response.ok) {
+				throw new Error(data.error || data.err || "Login failed");
 			}
+
 
 			localStorage.setItem("chat-user", JSON.stringify(data));
 			setAuthUser(data);

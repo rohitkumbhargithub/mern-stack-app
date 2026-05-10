@@ -18,9 +18,12 @@ const userLogout = () => {
             },
         });
 
-        const data = await response.json();
-        if(data.error){
-            throw new Error(data.error);
+        // Safely parse the response - body may be empty or non-JSON
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : {};
+
+        if(!response.ok){
+            throw new Error(data.error || data.err || "Logout failed");
         }
 
         localStorage.removeItem("chat-user");
