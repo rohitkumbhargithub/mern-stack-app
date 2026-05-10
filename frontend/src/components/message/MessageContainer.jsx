@@ -43,16 +43,16 @@ const MessageContainer = () => {
                         id: authUser._id,
                         display_name: authUser.name,
                         name: authUser.name,
-                        avatar_url: authUser.profilePic,
-                        profile: authUser.profilePic
+                        avatar_url: authUser.profile,
+                        profile: authUser.profile
                     },
                     {
                         _id: selectedConverstion.userId || selectedConverstion._id,
                         id: selectedConverstion.userId || selectedConverstion._id,
                         display_name: selectedConverstion.name,
                         name: selectedConverstion.name,
-                        avatar_url: selectedConverstion.profile || selectedConverstion.profilePic,
-                        profile: selectedConverstion.profile || selectedConverstion.profilePic
+                        avatar_url: selectedConverstion.profile,
+                        profile: selectedConverstion.profile
                     }
                 ]}
                 presence={new Set(onlineUsers)}

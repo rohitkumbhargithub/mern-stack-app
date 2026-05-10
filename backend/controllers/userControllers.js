@@ -54,6 +54,24 @@ exports.getUsersSildeBar = async (req, res, next) => {
     }
 }
 
+exports.updateProfile = async (req, res, next) => {
+    try {
+        const userId = req.user._id;
+        const { name, profilePic } = req.body;
+
+        const updatedUser = await User.findByIdAndUpdate(
+            userId,
+            { $set: { name, profile: profilePic } },
+            { new: true }
+        ).select("-password");
+
+        res.status(200).json(updatedUser);
+    } catch (err) {
+        console.log("update profile ", err);
+        res.status(500).json({ err: "Internal server error" });
+    }
+}
+
 exports.searchUsers = async (req, res, next) => {
     try {
         const loggedInUserId = req.user._id;

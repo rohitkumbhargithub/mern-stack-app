@@ -2,12 +2,14 @@ import React, { useState, useCallback } from 'react'
 import Converstions from './Converstions'
 import { MessageCircle, Plus, Settings, LogOut, Search } from 'lucide-react';
 import { NewChatDialog } from '../chat/NewChatDialog';
+import { SettingsDialog } from '../chat/SettingsDialog';
 import userLogout from '../../hooks/userLogout';
 import { useNavigate } from 'react-router-dom';
 import useConverstion from '../../zustand/useConverstion';
 
 const SideBar = () => {
     const [newChatOpen, setNewChatOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const [search, setSearch] = useState("");
     const [searchResults, setSearchResults] = useState([]);
     const [searchLoading, setSearchLoading] = useState(false);
@@ -56,7 +58,11 @@ const SideBar = () => {
                     >
                         <Plus className="h-4 w-4" />
                     </button>
-                    <button className="rounded-md p-1.5 hover:bg-accent text-muted-foreground transition-colors" title="Settings">
+                    <button 
+                        onClick={() => setSettingsOpen(true)}
+                        className="rounded-md p-1.5 hover:bg-accent text-muted-foreground transition-colors" 
+                        title="Settings"
+                    >
                         <Settings className="h-4 w-4" />
                     </button>
                     <button
@@ -102,6 +108,11 @@ const SideBar = () => {
                     }
                     setNewChatOpen(false);
                 }}
+            />
+
+            <SettingsDialog 
+                open={settingsOpen}
+                onOpenChange={setSettingsOpen}
             />
         </div>
     )
