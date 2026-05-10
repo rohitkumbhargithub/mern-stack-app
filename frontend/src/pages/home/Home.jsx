@@ -4,10 +4,11 @@ import MessageContainer from '../../components/message/MessageContainer';
 
 const Home = () => {
   return (
-    <div className='flex w-full h-[100dvh] sm:h-[80vh] sm:max-w-4xl sm:rounded-lg overflow-hidden bg-white/40 bg-clip-padding backdrop-filter backdrop-blur-lg shadow-xl'>
-        
+    <div className="flex h-[100dvh] w-full overflow-hidden bg-background">
+      <div className="grid h-full w-full grid-cols-[320px_1fr]">
         <SideBar />
         <MessageContainer />
+      </div>
     </div>
   )
 }

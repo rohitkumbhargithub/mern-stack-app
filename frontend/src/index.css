@@ -98,6 +98,10 @@ body {
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    --bubble-mine: var(--primary);
+    --bubble-mine-foreground: var(--primary-foreground);
+    --bubble-theirs: var(--secondary);
+    --bubble-theirs-foreground: var(--secondary-foreground);
   }
 
   .dark {
@@ -132,11 +136,28 @@ body {
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    --bubble-mine: var(--primary);
+    --bubble-mine-foreground: var(--primary-foreground);
+    --bubble-theirs: oklch(0.269 0 0);
+    --bubble-theirs-foreground: oklch(0.985 0 0);
   }
 
   * {
     @apply border-border;
     outline-color: var(--ring);
+  }
+
+  .bg-bubble-mine {
+    background-color: var(--bubble-mine);
+  }
+  .text-bubble-mine-foreground {
+    color: var(--bubble-mine-foreground);
+  }
+  .bg-bubble-theirs {
+    background-color: var(--bubble-theirs);
+  }
+  .text-bubble-theirs-foreground {
+    color: var(--bubble-theirs-foreground);
   }
 
   body {
