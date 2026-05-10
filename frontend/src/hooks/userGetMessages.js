@@ -10,11 +10,10 @@ const userGetMessages = () => {
     useEffect(() => {
         const getMessages = async () => {
             setLoading(true);
+            setMessages([]); // Clear old messages immediately
 
             try{
-
                 const response = await fetch(`/api/messages/${selectedConverstion._id}`);
-
                 const data = await response.json();
 
                 if(data.err){
