@@ -9,11 +9,27 @@ const messageSchema = new mongoose.Schema({
     recieverId : {
         type: mongoose.Schema.ObjectId,
         ref: "User",
+    },
+    conversationId: {
+        type: mongoose.Schema.ObjectId,
+        ref: "Converastion",
         required: true
     },
     message : {
         type: String,
         required: true
+    },
+    isDeleted: {
+        type: Boolean,
+        default: false
+    },
+    replyTo: {
+        type: mongoose.Schema.ObjectId,
+        ref: "Message"
+    },
+    isEdited: {
+        type: Boolean,
+        default: false
     }
 },{
     timestamps: true

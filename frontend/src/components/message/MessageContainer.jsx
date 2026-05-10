@@ -1,52 +1,83 @@
-import Messages from './Messages';
-import MessageInput from './MessageInput';
-import {TiMessages} from 'react-icons/ti';
-import { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import useConverstion from '../../zustand/useConverstion';
 import { useAuthContext } from '../../context/AuthContext';
+import { useSocketContext } from '../../context/SocketContext';
+import { ConversationView } from '../chat/ConversationView';
+import userGetMessages from '../../hooks/userGetMessages';
+import useListenMessages from '../../hooks/useListenMessages';
+import userSendMessage from '../../hooks/userSendMessage';
+import useDeleteMessage from '../../hooks/useDeleteMessage';
+import useTyping from '../../hooks/useTyping';
+import { MessageCircle } from 'lucide-react';
 
 const MessageContainer = () => {
-    const {selectedConverstion, setSelectedConverstion} = useConverstion();
+    const { selectedConverstion, setSelectedConverstion } = useConverstion();
+    const { authUser } = useAuthContext();
+    const { socket, onlineUsers } = useSocketContext();
+    const { messages, loading: messagesLoading } = userGetMessages();
+    useListenMessages();
+    const { sendMessage, loading: sendLoading } = userSendMessage();
+    const { deleteMessage } = useDeleteMessage();
+    const { typingUsers, sendTyping } = useTyping();
 
     useEffect(() => {
-
-      // cleanup function unmount
-
-      return () => setSelectedConverstion(null);
+        return () => setSelectedConverstion(null);
     }, [setSelectedConverstion]);
 
-  return (
-    <div className={`md:min-w-[450px] flex flex-col`}>
-       { !selectedConverstion ? (
-        <NoChatSelected />
-       ) : (
+    if (!selectedConverstion) {
+        return <NoChatSelected authUser={authUser} />;
+    }
 
-        <>
-            <div className='bg-slate-500 px-2 py-3 mb-2'>
-                <span className='label-text'>TO: <span className='text-gray-900 font-bold'>{selectedConverstion.name}</span></span>
-            </div>
-
-            <Messages />
-            <MessageInput />
-        </>
-
-       )} 
-    </div>
-  );
+    return (
+        <div className="flex h-full min-h-0 flex-col">
+            <ConversationView
+                conversationId={selectedConverstion._id}
+                conversationName={selectedConverstion.name}
+                messages={messages}
+                onSendMessage={(body, options) => sendMessage(body, options)}
+                onDeleteMessage={(id) => deleteMessage(id)}
+                currentUser={authUser}
+                members={[
+                    {
+                        _id: authUser._id,
+                        id: authUser._id,
+                        display_name: authUser.name,
+                        name: authUser.name,
+                        avatar_url: authUser.profilePic,
+                        profile: authUser.profilePic
+                    },
+                    {
+                        _id: selectedConverstion.userId || selectedConverstion._id,
+                        id: selectedConverstion.userId || selectedConverstion._id,
+                        display_name: selectedConverstion.name,
+                        name: selectedConverstion.name,
+                        avatar_url: selectedConverstion.profile || selectedConverstion.profilePic,
+                        profile: selectedConverstion.profile || selectedConverstion.profilePic
+                    }
+                ]}
+                presence={new Set(onlineUsers)}
+                typingUsers={typingUsers}
+                onTypingChange={sendTyping}
+                isLoading={messagesLoading}
+            />
+        </div>
+    );
 };
 
+const NoChatSelected = ({ authUser }) => {
+    return (
+        <div className='flex items-center justify-center w-full h-full bg-background'>
+            <div className='px-4 text-center text-muted-foreground flex flex-col items-center gap-4'>
+                <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center">
+                    <MessageCircle className="h-10 w-10 text-primary" />
+                </div>
+                <div>
+                    <h2 className="text-xl font-bold text-foreground mb-1">Welcome, {authUser?.name}!</h2>
+                    <p className="text-sm">Select a conversation from the sidebar to start chatting.</p>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 export default MessageContainer;
-
-const NoChatSelected = () => {
-  const {authUser} = useAuthContext();
-	return (
-		<div className='flex items-center justify-center w-full h-full'>
-			<div className='px-4 text-center sm:text-lg md:text-xl text-gray-200 font-semibold flex flex-col items-center gap-2'>
-				<p>Welcome 👋 {authUser.name} ❄</p>
-				<p>Select a chat to start messaging</p>
-				<TiMessages className='text-3xl md:text-6xl text-center' />
-			</div>
-		</div>
-	);
-};

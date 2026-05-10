@@ -18,7 +18,29 @@ const useListenMessages = () => {
 
     socket?.on("newMessage", handleNewMessage);
 
-    return () => socket?.off("newMessage", handleNewMessage);
+    const handleDeletedMessage = ({ messageId }) => {
+        const updatedMessages = messages.map((m) =>
+            (m._id || m.id) === messageId ? { ...m, isDeleted: true } : m
+        );
+        setMessages(updatedMessages);
+    };
+
+    socket?.on("messageDeleted", handleDeletedMessage);
+
+    const handleUpdatedMessage = (updatedMessage) => {
+        const updatedMessages = messages.map((m) =>
+            (m._id || m.id) === updatedMessage._id ? updatedMessage : m
+        );
+        setMessages(updatedMessages);
+    };
+
+    socket?.on("messageUpdated", handleUpdatedMessage);
+
+    return () => {
+        socket?.off("newMessage", handleNewMessage);
+        socket?.off("messageDeleted", handleDeletedMessage);
+        socket?.off("messageUpdated", handleUpdatedMessage);
+    };
   }, [socket, setMessages, messages]);
 }
 
