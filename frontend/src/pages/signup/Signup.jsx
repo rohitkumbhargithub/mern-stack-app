@@ -29,10 +29,9 @@ const Signup = () => {
 
 
   return (
-    <div className='flex flex-col items-center justify-center min-w-96 mx-auto'>
-        <div className='w-full p-6 rounded-lg shadow-md bg-gray-400 bg-clip-padding backdrop-filter backdrop-blur-lg
-         bg-opacity-0'>
-            <h1 className='text-3xl font-semibold text-center text-gray-300'>SignUp
+    <div className='flex flex-col items-center justify-center w-full max-w-md mx-auto px-4'>
+        <div className='w-full p-6 rounded-lg shadow-md bg-white/40 bg-clip-padding backdrop-filter backdrop-blur-lg'>
+            <h1 className='text-3xl font-semibold text-center text-gray-800'>SignUp
             <span className='text-blue-500'> SendChat</span></h1>
 
             <form onSubmit={handleSubmit}>

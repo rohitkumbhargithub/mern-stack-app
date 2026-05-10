@@ -3,26 +3,26 @@
 @tailwind utilities;
 
 body{
-    background: url('https://img.freepik.com/premium-vector/seamless-pattern-with-colorful-outline-bubble-speech-black-background_197792-6748.jpg');
-	background-size: cover;
+    background: linear-gradient(135deg, #fdfbfb 0%, #ebedee 100%);
+	background-attachment: fixed;
 }
 
-/* dark mode looking scrollbar */
+/* light mode looking scrollbar */
 ::-webkit-scrollbar {
 	width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-	background: #555;
+	background: #f1f1f1;
 }
 
 ::-webkit-scrollbar-thumb {
-	background: #121212;
+	background: #c1c1c1;
 	border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-	background: #242424;
+	background: #a8a8a8;
 }
 
 /* SHAKE ANIMATION ON HORIZONTAL DIRECTION */

@@ -4,8 +4,7 @@ import MessageContainer from '../../components/message/MessageContainer';
 
 const Home = () => {
   return (
-    <div className='flex lg:w-[750px] md:h-[550px] 
-    rounded-lg overflow-hidden bg-gray-400 bg-clip-padding backdrop-filter backdrop-blur-lg bg-opacity-0'>
+    <div className='flex w-full h-[100dvh] sm:h-[80vh] sm:max-w-4xl sm:rounded-lg overflow-hidden bg-white/40 bg-clip-padding backdrop-filter backdrop-blur-lg shadow-xl'>
         
         <SideBar />
         <MessageContainer />
