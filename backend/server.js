@@ -1,6 +1,8 @@
+const dotenv = require('dotenv');
+dotenv.config();
+
 const express = require('express');
 const path = require('path');
-const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 const PORT = process.env.PORT || 8000;
 const authRoutes = require('./routes/authRoutes');
@@ -9,9 +11,7 @@ const userRoutes = require('./routes/userRoutes');
 const connectToDb = require('./db/mongoose');
 const { app, server } = require('./socket/socket');
 
-const __variableOfChoice = path.resolve()
-
-dotenv.config();
+const __variableOfChoice = path.resolve();
 app.use(express.json());
 app.use(cookieParser());
 
