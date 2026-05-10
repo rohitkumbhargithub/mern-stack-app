@@ -7,6 +7,7 @@ import userGetMessages from '../../hooks/userGetMessages';
 import useListenMessages from '../../hooks/useListenMessages';
 import userSendMessage from '../../hooks/userSendMessage';
 import useDeleteMessage from '../../hooks/useDeleteMessage';
+import useTyping from '../../hooks/useTyping';
 import { MessageCircle } from 'lucide-react';
 
 const MessageContainer = () => {
@@ -17,6 +18,7 @@ const MessageContainer = () => {
     useListenMessages();
     const { sendMessage, loading: sendLoading } = userSendMessage();
     const { deleteMessage } = useDeleteMessage();
+    const { typingUsers, sendTyping } = useTyping();
 
     useEffect(() => {
         return () => setSelectedConverstion(null);
@@ -54,6 +56,8 @@ const MessageContainer = () => {
                     }
                 ]}
                 presence={new Set(onlineUsers)}
+                typingUsers={typingUsers}
+                onTypingChange={sendTyping}
                 isLoading={messagesLoading}
             />
         </div>

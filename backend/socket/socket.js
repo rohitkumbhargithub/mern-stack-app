@@ -31,9 +31,21 @@ io.on("connection", (socket) => {
 
     io.emit("getOnlineUsers", Object.keys(userSocketMap));
 
-    // socket.on() is used to listen to the events. can be used both on client and server side
+    // Handle joining conversation rooms
+    socket.on("joinRoom", (roomId) => {
+        socket.join(roomId);
+    });
+
+    // Handle typing indicators
+    socket.on("typing", ({ roomId, userId }) => {
+        socket.to(roomId).emit("typing", { roomId, userId });
+    });
+
+    socket.on("stopTyping", ({ roomId, userId }) => {
+        socket.to(roomId).emit("stopTyping", { roomId, userId });
+    });
+
     socket.on("disconnect", () => {
-        // console.log("user disconnected ", socket.id);
         delete userSocketMap[userId];
         io.emit("getOnlineUsers", Object.keys(userSocketMap));
     });

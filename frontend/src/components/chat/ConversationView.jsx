@@ -23,8 +23,10 @@ export function ConversationView({
   onDeleteMessage,
   onEditMessage,
   onReplyMessage,
-  onForwardMessage
+  onForwardMessage,
+  onTypingChange
 }) {
+  const typingTimeoutRef = useRef(null);
   const { setSelectedConverstion } = useConverstion();
   const me = String(currentUser?._id || currentUser?.id || "");
   const [text, setText] = useState("");
@@ -73,6 +75,19 @@ export function ConversationView({
 
   const otherMember = members.find((m) => (m.id || m._id) !== me);
   const isGroup = members.length > 2;
+
+  const handleTextChange = (e) => {
+    const val = e.target.value;
+    setText(val);
+
+    if (onTypingChange) {
+      onTypingChange(true);
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        onTypingChange(false);
+      }, 2000);
+    }
+  };
 
   const handleSend = async (override) => {
     const body = override?.body ?? text.trim();
@@ -174,9 +189,16 @@ export function ConversationView({
       </div>
 
       {/* Typing */}
-      <div className="h-5 px-5 text-xs text-muted-foreground">
+      <div className="h-6 px-5 flex items-center gap-2 text-[11px] text-muted-foreground font-medium">
         {typingNames.length > 0 && (
-          <span>{typingNames.slice(0, 2).join(", ")}{typingNames.length > 2 ? " and others" : ""} typing…</span>
+          <>
+            <div className="flex gap-1">
+              <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+              <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+              <span className="w-1 h-1 bg-muted-foreground rounded-full animate-bounce"></span>
+            </div>
+            <span>{typingNames.slice(0, 2).join(", ")}{typingNames.length > 2 ? " and others" : ""} typing…</span>
+          </>
         )}
       </div>
 
@@ -233,7 +255,7 @@ export function ConversationView({
 
           <textarea
             value={text}
-            onChange={(e) => setText(e.target.value)}
+            onChange={handleTextChange}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
