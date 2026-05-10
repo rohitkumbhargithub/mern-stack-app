@@ -18,7 +18,19 @@ const useListenMessages = () => {
 
     socket?.on("newMessage", handleNewMessage);
 
-    return () => socket?.off("newMessage", handleNewMessage);
+    const handleDeletedMessage = ({ messageId }) => {
+        const updatedMessages = messages.map((m) =>
+            (m._id || m.id) === messageId ? { ...m, isDeleted: true } : m
+        );
+        setMessages(updatedMessages);
+    };
+
+    socket?.on("messageDeleted", handleDeletedMessage);
+
+    return () => {
+        socket?.off("newMessage", handleNewMessage);
+        socket?.off("messageDeleted", handleDeletedMessage);
+    };
   }, [socket, setMessages, messages]);
 }
 

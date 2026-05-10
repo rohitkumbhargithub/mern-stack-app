@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { toast } from "sonner";
-import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2, MessageCircle } from "lucide-react";
+import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2, MessageCircle, Trash2 } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
@@ -17,7 +17,8 @@ export function ConversationView({
   members = [],
   typingUsers = [],
   presence = new Set(),
-  isLoading = false
+  isLoading = false,
+  onDeleteMessage
 }) {
   const me = String(currentUser?._id || currentUser?.id || "");
   const [text, setText] = useState("");
@@ -137,6 +138,7 @@ export function ConversationView({
                     showHeader={showHeader}
                     reactions={msg.reactions || []}
                     onReact={(e) => onReact && onReact(msg.id || msg._id, e)}
+                    onDelete={() => onDeleteMessage && onDeleteMessage(msg.id || msg._id)}
                     meId={me}
                   />
                 );
@@ -211,7 +213,7 @@ export function ConversationView({
 }
 
 function MessageItem({
-  msg, mine, sender, showHeader, reactions, onReact, meId,
+  msg, mine, sender, showHeader, reactions, onReact, onDelete, meId,
 }) {
   const grouped = {};
   reactions.forEach((r) => { (grouped[r.emoji] ??= []).push(r); });
@@ -242,29 +244,42 @@ function MessageItem({
                 : "bg-bubble-theirs text-bubble-theirs-foreground rounded-bl-md")
             }
           >
-            {(msg.attachment_url || msg.attachment) && (msg.attachment_type === "image" || msg.attachment?.type?.startsWith("image/")) && (
-              <a href={msg.attachment_url || msg.attachment?.url} target="_blank" rel="noreferrer">
-                <img src={msg.attachment_url || msg.attachment?.url} alt="" className="mb-1 max-h-72 rounded-lg" />
-              </a>
+            {msg.isDeleted ? (
+              <div className="italic opacity-60 text-xs py-1">
+                This message was deleted by its author
+              </div>
+            ) : (
+              <>
+                {(msg.attachment_url || msg.attachment) && (msg.attachment_type === "image" || msg.attachment?.type?.startsWith("image/")) && (
+                  <a href={msg.attachment_url || msg.attachment?.url} target="_blank" rel="noreferrer">
+                    <img src={msg.attachment_url || msg.attachment?.url} alt="" className="mb-1 max-h-72 rounded-lg" />
+                  </a>
+                )}
+                {(msg.attachment_url || msg.attachment) && (msg.attachment_type === "file" || (msg.attachment && !msg.attachment?.type?.startsWith("image/"))) && (
+                  <a href={msg.attachment_url || msg.attachment?.url} target="_blank" rel="noreferrer"
+                    className={"mb-1 flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs " + (mine ? "border-white/20 hover:bg-white/10" : "border-border hover:bg-muted")}>
+                    <FileText className="h-4 w-4" />
+                    <span className="truncate">{msg.attachment_name || msg.attachment?.name || "File"}</span>
+                    {(msg.attachment_size || msg.attachment?.size) && <span className="opacity-60">({Math.round((msg.attachment_size || msg.attachment?.size) / 1024)} KB)</span>}
+                  </a>
+                )}
+                {(msg.body || msg.message) && <div className="whitespace-pre-wrap break-words">{msg.body || msg.message}</div>}
+              </>
             )}
-            {(msg.attachment_url || msg.attachment) && (msg.attachment_type === "file" || (msg.attachment && !msg.attachment?.type?.startsWith("image/"))) && (
-              <a href={msg.attachment_url || msg.attachment?.url} target="_blank" rel="noreferrer"
-                className={"mb-1 flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs " + (mine ? "border-white/20 hover:bg-white/10" : "border-border hover:bg-muted")}>
-                <FileText className="h-4 w-4" />
-                <span className="truncate">{msg.attachment_name || msg.attachment?.name || "File"}</span>
-                {(msg.attachment_size || msg.attachment?.size) && <span className="opacity-60">({Math.round((msg.attachment_size || msg.attachment?.size) / 1024)} KB)</span>}
-              </a>
-            )}
-            {(msg.body || msg.message) && <div className="whitespace-pre-wrap break-words">{msg.body || msg.message}</div>}
           </div>
 
           {/* Hover reaction picker */}
           <div className={"absolute -top-3 hidden gap-0.5 rounded-full border border-border bg-card px-1 py-0.5 shadow-sm group-hover:flex " + (mine ? "right-0" : "left-0")}>
-            {EMOJIS.slice(0, 6).map((e) => (
+            {!msg.isDeleted && EMOJIS.slice(0, 6).map((e) => (
               <button key={e} onClick={() => onReact && onReact(e)} className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-xs">
                 {e}
               </button>
             ))}
+            {mine && !msg.isDeleted && (
+              <button onClick={onDelete} className="grid h-6 w-6 place-items-center rounded-full hover:bg-destructive hover:text-destructive-foreground text-xs text-muted-foreground transition-colors" title="Delete message">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
