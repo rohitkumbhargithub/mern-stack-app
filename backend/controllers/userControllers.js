@@ -5,24 +5,37 @@ exports.getUsersSildeBar = async (req, res, next) => {
     try {
         const loggedInUserId = req.user._id;
         
-        // Find all conversations where the logged-in user is a participant AND there is at least one message
+        // Only show 1-on-1 conversations that have messages
         const conversations = await Converastion.find({
             participated: { $in: [loggedInUserId] },
+            isGroupChat: { $ne: true },
             messages: { $not: { $size: 0 } }
-        });
+        }).populate("participated", "-password").sort({ updatedAt: -1 });
 
-        // Extract the IDs of the other participants
-        const participantIds = conversations.reduce((acc, conv) => {
-            const others = conv.participated.filter(id => id.toString() !== loggedInUserId.toString());
-            return [...acc, ...others];
-        }, []);
+        const sidebarData = conversations.map(conv => {
+            if (conv.isGroupChat) {
+                return {
+                    _id: conv._id,
+                    name: conv.chatName,
+                    isGroupChat: true,
+                    profile: conv.groupAvatar,
+                    type: "group",
+                    participants: conv.participated
+                };
+            } else {
+                const otherUser = conv.participated.find(u => u._id.toString() !== loggedInUserId.toString());
+                if (!otherUser) return null;
+                return {
+                    ...otherUser.toObject(),
+                    _id: conv._id, // USE CONVERSATION ID HERE
+                    userId: otherUser._id, // KEEP USER ID SEPARATELY
+                    isGroupChat: false,
+                    type: "user"
+                };
+            }
+        }).filter(item => item !== null);
 
-        // Get the user details for those participants
-        const filterUsers = await User.find({ 
-            _id: { $in: participantIds } 
-        }).select('-password');
-
-        res.status(200).json(filterUsers);
+        res.status(200).json(sidebarData);
 
     } catch (err) {
         console.log("get users ", err)

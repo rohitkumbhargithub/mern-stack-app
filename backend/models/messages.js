@@ -9,6 +9,10 @@ const messageSchema = new mongoose.Schema({
     recieverId : {
         type: mongoose.Schema.ObjectId,
         ref: "User",
+    },
+    conversationId: {
+        type: mongoose.Schema.ObjectId,
+        ref: "Converastion",
         required: true
     },
     message : {
@@ -18,6 +22,10 @@ const messageSchema = new mongoose.Schema({
     isDeleted: {
         type: Boolean,
         default: false
+    },
+    replyTo: {
+        type: mongoose.Schema.ObjectId,
+        ref: "Message"
     }
 },{
     timestamps: true

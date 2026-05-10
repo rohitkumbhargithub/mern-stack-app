@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useCallback } from 'react'
 import Converstions from './Converstions'
 import { MessageCircle, Plus, Settings, LogOut, Search } from 'lucide-react';
 import { NewChatDialog } from '../chat/NewChatDialog';
@@ -20,7 +20,11 @@ const SideBar = () => {
         navigate("/login");
     };
 
-    const handleSearchUsers = async (query) => {
+    const handleSearchUsers = useCallback(async (query) => {
+        if (!query.trim()) {
+            setSearchResults([]);
+            return;
+        }
         setSearchLoading(true);
         try {
             const res = await fetch(`/api/users/search?q=${encodeURIComponent(query || "")}`);
@@ -32,7 +36,7 @@ const SideBar = () => {
         } finally {
             setSearchLoading(false);
         }
-    };
+    }, []);
 
     return (
         <div className='flex flex-col h-full border-r border-border bg-card'>
@@ -79,8 +83,8 @@ const SideBar = () => {
             </div>
 
             <div className='flex-1 overflow-y-auto px-2 pb-2'>
-                <Converstions 
-                    searchFilter={search} 
+                <Converstions
+                    searchFilter={search}
                     onStartNewChat={() => setNewChatOpen(true)}
                 />
             </div>

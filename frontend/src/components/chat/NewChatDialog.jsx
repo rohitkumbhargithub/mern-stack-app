@@ -20,23 +20,23 @@ export function NewChatDialog({
   const [confirmDm, setConfirmDm] = useState(null);
 
   useEffect(() => {
-    if (!open) { 
-      setQ(""); 
-      setSelected([]); 
-      setGroupName(""); 
-      setTab("dm"); 
+    if (!open) {
+      setQ("");
+      setSelected([]);
+      setGroupName("");
+      setTab("dm");
       setConfirmDm(null);
     }
   }, [open]);
 
   useEffect(() => {
-    if (onSearch && !confirmDm) {
+    if (open && onSearch && !confirmDm) {
       const t = setTimeout(() => {
         onSearch(q);
       }, 300);
       return () => clearTimeout(t);
     }
-  }, [q, onSearch, confirmDm]);
+  }, [q, onSearch, confirmDm, open]);
 
   const toggle = (p) => {
     setSelected((prev) => prev.some((x) => (x.id || x._id) === (p.id || p._id))
@@ -75,9 +75,9 @@ export function NewChatDialog({
             <div className="flex w-full flex-col gap-3">
               <button
                 onClick={() => {
-                   onStartChat && onStartChat("dm", confirmDm);
-                   setConfirmDm(null);
-                   onOpenChange(false);
+                  onStartChat && onStartChat("dm", confirmDm);
+                  setConfirmDm(null);
+                  onOpenChange(false);
                 }}
                 className="w-full rounded-xl bg-primary px-6 py-3.5 text-sm font-bold text-primary-foreground hover:bg-primary/90 transition-all shadow-lg shadow-primary/20 active:scale-[0.98]"
               >

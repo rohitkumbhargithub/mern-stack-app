@@ -18,8 +18,6 @@ const MessageContainer = () => {
     const { sendMessage, loading: sendLoading } = userSendMessage();
     const { deleteMessage } = useDeleteMessage();
 
-    console.log("MessageContainer rendering. Selected:", selectedConverstion?._id);
-
     useEffect(() => {
         return () => setSelectedConverstion(null);
     }, [setSelectedConverstion]);
@@ -30,41 +28,31 @@ const MessageContainer = () => {
 
     return (
         <div className="flex h-full min-h-0 flex-col">
-            <ConversationView 
+            <ConversationView
                 conversationId={selectedConverstion._id}
                 conversationName={selectedConverstion.name}
                 messages={messages}
                 onSendMessage={(body) => sendMessage(body)}
                 onDeleteMessage={(id) => deleteMessage(id)}
                 currentUser={authUser}
-                members={selectedConverstion.isGroupChat 
-                    ? selectedConverstion.participants.map(p => ({
-                        ...p,
-                        _id: p._id,
-                        id: p._id,
-                        display_name: p.name,
-                        avatar_url: p.profile,
-                        profile: p.profile
-                    }))
-                    : [
-                        { 
-                            _id: authUser._id, 
-                            id: authUser._id, 
-                            display_name: authUser.name, 
-                            name: authUser.name, 
-                            avatar_url: authUser.profilePic, 
-                            profile: authUser.profilePic 
-                        },
-                        { 
-                            _id: selectedConverstion._id, 
-                            id: selectedConverstion._id, 
-                            display_name: selectedConverstion.name, 
-                            name: selectedConverstion.name, 
-                            avatar_url: selectedConverstion.profile, 
-                            profile: selectedConverstion.profile 
-                        }
-                    ]
-                }
+                members={[
+                    {
+                        _id: authUser._id,
+                        id: authUser._id,
+                        display_name: authUser.name,
+                        name: authUser.name,
+                        avatar_url: authUser.profilePic,
+                        profile: authUser.profilePic
+                    },
+                    {
+                        _id: selectedConverstion.userId || selectedConverstion._id,
+                        id: selectedConverstion.userId || selectedConverstion._id,
+                        display_name: selectedConverstion.name,
+                        name: selectedConverstion.name,
+                        avatar_url: selectedConverstion.profile || selectedConverstion.profilePic,
+                        profile: selectedConverstion.profile || selectedConverstion.profilePic
+                    }
+                ]}
                 presence={new Set(onlineUsers)}
                 isLoading={messagesLoading}
             />

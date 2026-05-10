@@ -5,35 +5,36 @@ import useConverstion from "../zustand/useConverstion";
 
 const userGetMessages = () => {
     const [loading, setLoading] = useState(false);
-    const {messages, setMessages, selectedConverstion} = useConverstion();
+    const { messages, setMessages, selectedConverstion } = useConverstion();
+    console.log("Selected converstion from useGetMessages:", selectedConverstion?._id);
 
     useEffect(() => {
         const getMessages = async () => {
             setLoading(true);
             setMessages([]); // Clear old messages immediately
 
-            try{
+            try {
                 const response = await fetch(`/api/messages/${selectedConverstion._id}`);
                 const data = await response.json();
 
-                if(data.err){
+                if (data.err) {
                     throw new Error(data.err);
                 }
 
                 setMessages(data);
 
-            }catch(err){
+            } catch (err) {
                 toast.error(err.message);
-            }finally{
+            } finally {
                 setLoading(false);
             }
         }
 
-        if(selectedConverstion?._id) getMessages();
+        if (selectedConverstion?._id) getMessages();
 
-    },[selectedConverstion?._id, setMessages]);
+    }, [selectedConverstion?._id, setMessages]);
 
-    return {messages, loading};
+    return { messages, loading };
 };
 
 export default userGetMessages;

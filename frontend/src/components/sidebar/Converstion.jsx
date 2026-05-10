@@ -9,7 +9,9 @@ const Converstion = ({ converstion }) => {
     const { onlineUsers } = useSocketContext();
     const isOnline = onlineUsers.includes(converstion._id);
 
-    const name = converstion.name || converstion.username || "Unknown";
+    console.log(converstion.name, "from trst");
+
+    const name = converstion.name || converstion.username || "Test";
     const initials = (name || "?")
         .split(/\s+/).map((s) => s[0]).slice(0, 2).join("").toUpperCase();
 
@@ -23,10 +25,10 @@ const Converstion = ({ converstion }) => {
         >
             <div className="relative shrink-0">
                 {converstion.profile || converstion.profilePic ? (
-                    <img 
-                        src={converstion.profile || converstion.profilePic} 
-                        alt={name} 
-                        className="h-9 w-9 rounded-full object-cover border border-border/50" 
+                    <img
+                        src={converstion.profile || converstion.profilePic}
+                        alt={name}
+                        className="h-9 w-9 rounded-full object-cover border border-border/50"
                     />
                 ) : (
                     <div className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-xs font-bold text-primary">
@@ -37,7 +39,7 @@ const Converstion = ({ converstion }) => {
                     <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-card bg-green-500" />
                 )}
             </div>
-            
+
             <div className="min-w-0 flex-1">
                 <div className="flex items-baseline justify-between gap-2">
                     <span className={`truncate text-sm ${isSelected ? "font-bold" : "font-medium"}`}>{name}</span>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { toast } from "sonner";
-import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2, MessageCircle, Trash2 } from "lucide-react";
+import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2, MessageCircle, Trash2, Pencil, Reply, Forward, MoreVertical } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
@@ -18,7 +18,10 @@ export function ConversationView({
   typingUsers = [],
   presence = new Set(),
   isLoading = false,
-  onDeleteMessage
+  onDeleteMessage,
+  onEditMessage,
+  onReplyMessage,
+  onForwardMessage
 }) {
   const me = String(currentUser?._id || currentUser?.id || "");
   const [text, setText] = useState("");
@@ -26,6 +29,8 @@ export function ConversationView({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
   const scrollerRef = useRef(null);
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
 
   // Auto scroll on new messages
   useEffect(() => {
@@ -55,15 +60,19 @@ export function ConversationView({
 
   const grouped = useMemo(() => groupByDay(messages), [messages]);
 
+  console.log(grouped, "from groupid messgw")
+
   const handleSend = async (override) => {
     const body = override?.body ?? text.trim();
     if (!body && !override?.attachment_url) return;
 
     if (onSendMessage) {
       setSending(true);
-      await onSendMessage(body, override);
+      await onSendMessage(body, { ...override, replyTo: replyingTo?._id, editId: editingMessage?._id });
       setSending(false);
       setText("");
+      setReplyingTo(null);
+      setEditingMessage(null);
     }
   };
 
@@ -139,6 +148,9 @@ export function ConversationView({
                     reactions={msg.reactions || []}
                     onReact={(e) => onReact && onReact(msg.id || msg._id, e)}
                     onDelete={() => onDeleteMessage && onDeleteMessage(msg.id || msg._id)}
+                    onEdit={() => { setEditingMessage(msg); setReplyingTo(null); setText(msg.message || msg.body); }}
+                    onReply={() => { setReplyingTo(msg); setEditingMessage(null); }}
+                    onForward={() => onForwardMessage && onForwardMessage(msg)}
                     meId={me}
                   />
                 );
@@ -154,6 +166,37 @@ export function ConversationView({
           <span>{typingNames.slice(0, 2).join(", ")}{typingNames.length > 2 ? " and others" : ""} typing…</span>
         )}
       </div>
+
+      {/* Reply/Edit Bar */}
+      {replyingTo && (
+        <div className="flex items-center justify-between bg-muted/30 px-4 py-2 border-t border-border animate-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-1 bg-primary h-8 rounded-full shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold text-primary uppercase tracking-wider">Replying to {memberMap.get(replyingTo.senderId)?.name || "User"}</div>
+              <div className="text-xs text-muted-foreground truncate">{replyingTo.message || replyingTo.body}</div>
+            </div>
+          </div>
+          <button onClick={() => setReplyingTo(null)} className="p-1 hover:bg-muted rounded-full transition-colors">
+            <X className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
+      )}
+
+      {editingMessage && (
+        <div className="flex items-center justify-between bg-primary/5 px-4 py-2 border-t border-primary/20 animate-in slide-in-from-bottom-2">
+          <div className="flex items-center gap-3 min-w-0">
+            <Pencil className="h-4 w-4 text-primary shrink-0" />
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold text-primary uppercase tracking-wider">Editing Message</div>
+              <div className="text-xs text-muted-foreground truncate">{editingMessage.message || editingMessage.body}</div>
+            </div>
+          </div>
+          <button onClick={() => { setEditingMessage(null); setText(""); }} className="p-1 hover:bg-muted rounded-full transition-colors">
+            <X className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
+      )}
 
       {/* Composer */}
       <div className="border-t border-border bg-card px-4 py-3">
@@ -213,8 +256,9 @@ export function ConversationView({
 }
 
 function MessageItem({
-  msg, mine, sender, showHeader, reactions, onReact, onDelete, meId,
+  msg, mine, sender, showHeader, reactions, onReact, onDelete, onEdit, onReply, onForward, meId,
 }) {
+  console.log(sender, "from message item");
   const grouped = {};
   reactions.forEach((r) => { (grouped[r.emoji] ??= []).push(r); });
 
@@ -250,6 +294,12 @@ function MessageItem({
               </div>
             ) : (
               <>
+                {msg.replyTo && (
+                  <div className={"mb-2 border-l-2 border-primary/40 bg-black/5 px-2 py-1 rounded " + (mine ? "text-bubble-mine-foreground/80" : "text-bubble-theirs-foreground/80")}>
+                    <div className="text-[10px] font-bold">Replying to...</div>
+                    <div className="text-xs truncate italic">{msg.replyTo.message || msg.replyTo.body}</div>
+                  </div>
+                )}
                 {(msg.attachment_url || msg.attachment) && (msg.attachment_type === "image" || msg.attachment?.type?.startsWith("image/")) && (
                   <a href={msg.attachment_url || msg.attachment?.url} target="_blank" rel="noreferrer">
                     <img src={msg.attachment_url || msg.attachment?.url} alt="" className="mb-1 max-h-72 rounded-lg" />
@@ -268,17 +318,37 @@ function MessageItem({
             )}
           </div>
 
-          {/* Hover reaction picker */}
-          <div className={"absolute -top-3 hidden gap-0.5 rounded-full border border-border bg-card px-1 py-0.5 shadow-sm group-hover:flex " + (mine ? "right-0" : "left-0")}>
-            {!msg.isDeleted && EMOJIS.slice(0, 6).map((e) => (
-              <button key={e} onClick={() => onReact && onReact(e)} className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-xs">
-                {e}
-              </button>
-            ))}
-            {mine && !msg.isDeleted && (
-              <button onClick={onDelete} className="grid h-6 w-6 place-items-center rounded-full hover:bg-destructive hover:text-destructive-foreground text-xs text-muted-foreground transition-colors" title="Delete message">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+          {/* Hover menu */}
+          <div className={"absolute -top-3 hidden items-center gap-0.5 rounded-full border border-border bg-card px-1 py-0.5 shadow-md group-hover:flex " + (mine ? "right-0" : "left-0")}>
+            {!msg.isDeleted && (
+              <div className="flex items-center border-r border-border pr-0.5 mr-0.5">
+                {EMOJIS.slice(0, 4).map((e) => (
+                  <button key={e} onClick={() => onReact && onReact(e)} className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-xs">
+                    {e}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!msg.isDeleted && (
+              <>
+                <button onClick={onReply} className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Reply">
+                  <Reply className="h-3.5 w-3.5" />
+                </button>
+                <button onClick={onForward} className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Forward">
+                  <Forward className="h-3.5 w-3.5" />
+                </button>
+                {mine && (
+                  <button onClick={onEdit} className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Edit">
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {mine && (
+                  <button onClick={onDelete} className="grid h-6 w-6 place-items-center rounded-full hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors" title="Delete">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>

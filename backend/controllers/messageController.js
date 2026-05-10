@@ -4,76 +4,116 @@ const { getReceiverSocketId, io } = require("../socket/socket");
 
 
 exports.sendMessage = async (req, res) => {
-    try{
-
-        const { message } = req.body;
-        const { id: recieverId } = req.params;
+    try {
+        const { message, replyTo, editId } = req.body;
+        const { id: targetId } = req.params;
         const senderId = req.user._id;
 
-        let consverastions = await Converastion.findOne({
-            participated: {
-                $all : [senderId, recieverId]
-            },
-        });
+        // If editing an existing message
+        if (editId) {
+            const existingMessage = await Message.findById(editId);
+            if (!existingMessage) return res.status(404).json({ error: "Message not found" });
+            if (existingMessage.senderId.toString() !== senderId.toString()) {
+                return res.status(401).json({ error: "Unauthorized" });
+            }
+            existingMessage.message = message;
+            await existingMessage.save();
 
-        if(!consverastions){
-            consverastions = await Converastion.create({
-                participated: [senderId, recieverId],
+            // Notify via socket
+            const conversation = await Converastion.findById(existingMessage.conversationId);
+            if (conversation) {
+                io.to(conversation._id.toString()).emit("messageUpdated", existingMessage);
+            }
+            return res.status(200).json(existingMessage);
+        }
+
+        // Normal send logic
+        let conversation = await Converastion.findById(targetId);
+
+        if (!conversation) {
+            conversation = await Converastion.findOne({
+                participated: { $all: [senderId, targetId] },
+                isGroupChat: false
+            });
+        }
+
+        if (!conversation) {
+            conversation = await Converastion.create({
+                participated: [senderId, targetId],
             });
         }
 
         const newMessage = new Message({
             senderId,
-            recieverId,
+            conversationId: conversation._id,
             message,
-        })
+            replyTo: replyTo || undefined
+        });
 
-        if(newMessage){
-            consverastions.messages.push(newMessage._id);
+        if (newMessage) {
+            conversation.messages.push(newMessage._id);
         }
 
-        // await consverstions.save();
-        // await newMessage.save();
+        await Promise.all([conversation.save(), newMessage.save()]);
 
-        await Promise.all([consverastions.save(), newMessage.save()]);
-
-        // socket fuctionality will go here
-        const receiverSocketId = getReceiverSocketId(recieverId);
-        if(receiverSocketId){
-            
-            io.to(receiverSocketId).emit("newMessage", newMessage);
+        // Populate replyTo for the socket emission
+        if (replyTo) {
+            await newMessage.populate("replyTo");
         }
 
+        // Socket functionality
+        if (conversation.isGroupChat) {
+            io.to(conversation._id.toString()).emit("newMessage", newMessage);
+        } else {
+            conversation.participated.forEach(pId => {
+                const socketId = getReceiverSocketId(pId);
+                if (socketId) {
+                    io.to(socketId).emit("newMessage", newMessage);
+                }
+            });
+        }
 
         res.status(200).json(newMessage);
 
-    }catch(err){
-        // console.log('send Message ', err);
-        res.status(500).json({err: "Internal server error"});
+    } catch (err) {
+        console.log('send Message ', err);
+        res.status(500).json({ err: "Internal server error" });
     }
 }
 
 
 
 exports.getMessage = async (req, res, next) => {
-    try{
-
-        const { id: userToChatId } = req.params;
+    try {
+        const { id: targetId } = req.params;
         const senderId = req.user._id;
 
-        const consverastions = await Converastion.findOne({
-            participated: { $all: [senderId, userToChatId] },
-        }).populate("messages");
+        console.log(targetId, "from resrsre")
 
+        // Try finding by conversation ID first (works for groups and existing 1-on-1s)
+        let conversation = await Converastion.findById(targetId).populate({
+            path: "messages",
+            populate: { path: "replyTo" }
+        });
 
-        if(!consverastions) return  res.status(200).json([]);
+        if (!conversation) {
+            // Fallback: Try finding 1-on-1 by other user's ID
+            conversation = await Converastion.findOne({
+                participated: { $all: [senderId, targetId] },
+                isGroupChat: false
+            }).populate({
+                path: "messages",
+                populate: { path: "replyTo" }
+            });
+        }
 
-        const message = consverastions.messages
-        res.status(200).json(consverastions.messages);
+        if (!conversation) return res.status(200).json([]);
 
-    }catch(err){
+        res.status(200).json(conversation.messages);
+
+    } catch (err) {
         console.log("get message ", err)
-        res.status(500).json({err: "Internal server error"});
+        res.status(500).json({ err: "Internal server error" });
     }
 }
 
