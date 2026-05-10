@@ -26,6 +26,10 @@ const messageSchema = new mongoose.Schema({
     replyTo: {
         type: mongoose.Schema.ObjectId,
         ref: "Message"
+    },
+    isEdited: {
+        type: Boolean,
+        default: false
     }
 },{
     timestamps: true

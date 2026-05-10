@@ -31,12 +31,33 @@ export function ConversationView({
   const scrollerRef = useRef(null);
   const [replyingTo, setReplyingTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
+  const [highlightedId, setHighlightedId] = useState(null);
 
-  // Auto scroll on new messages
+  const scrollToMessage = (msgId) => {
+    const el = document.getElementById(`msg-${msgId}`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setHighlightedId(msgId);
+      setTimeout(() => setHighlightedId(null), 3000);
+    }
+  };
+
+  // Auto scroll to bottom
   useEffect(() => {
-    const el = scrollerRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [messages.length]);
+    const scroll = () => {
+      const el = scrollerRef.current;
+      if (el) {
+        el.scrollTo({
+          top: el.scrollHeight,
+          behavior: "instant"
+        });
+      }
+    };
+    
+    scroll();
+    const t = setTimeout(scroll, 100);
+    return () => clearTimeout(t);
+  }, [messages.length, conversationId]);
 
   const memberMap = useMemo(() => {
     const map = new Map();
@@ -49,18 +70,6 @@ export function ConversationView({
 
   const otherMember = members.find((m) => (m.id || m._id) !== me);
   const isGroup = members.length > 2;
-
-  const title = isGroup
-    ? "Group Chat"
-    : otherMember?.name || otherMember?.display_name || otherMember?.username || "Direct Message";
-
-  const subtitle = isGroup
-    ? `${members.length} members`
-    : (presence.has(otherMember?.id || otherMember?._id) ? "Online" : "Offline");
-
-  const grouped = useMemo(() => groupByDay(messages), [messages]);
-
-  console.log(grouped, "from groupid messgw")
 
   const handleSend = async (override) => {
     const body = override?.body ?? text.trim();
@@ -76,57 +85,50 @@ export function ConversationView({
     }
   };
 
-  const onPickFile = async (file) => {
-    if (!file) return;
-    if (file.size > 20 * 1024 * 1024) return toast.error("Max 20 MB");
-
-    if (onFileUpload) {
-      setUploading(true);
-      await onFileUpload(file);
-      setUploading(false);
-    }
-  };
-
   const typingNames = typingUsers
     .map((u) => memberMap.get(u)?.display_name || memberMap.get(u)?.username)
     .filter(Boolean);
 
+  const grouped = useMemo(() => groupByDay(messages), [messages]);
+
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full flex-col bg-background overflow-hidden">
       {/* Header */}
-      <div className="flex items-center gap-3 border-b border-border bg-card px-5 py-3">
-        <div className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
-          {isGroup ? <Users className="h-4 w-4" /> : <UserIcon className="h-4 w-4" />}
-        </div>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{title}</div>
-          <div className="text-xs text-muted-foreground">{subtitle}</div>
+      <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2.5 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            {otherMember?.profile || otherMember?.profilePic ? (
+              <img src={otherMember.profile || otherMember.profilePic} className="h-9 w-9 rounded-full object-cover border border-border/50" alt="" />
+            ) : (
+              <div className="grid h-9 w-9 place-items-center rounded-full bg-primary/10 text-primary">
+                {isGroup ? <Users className="h-5 w-5" /> : <UserIcon className="h-5 w-5" />}
+              </div>
+            )}
+            {!isGroup && otherMember && presence.has(otherMember._id || otherMember.id) && (
+              <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-card bg-green-500" />
+            )}
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-foreground leading-tight">{otherMember?.display_name || otherMember?.name || "Chat"}</h3>
+            <p className="text-[10px] text-muted-foreground font-medium">
+              {!isGroup && otherMember && (presence.has(otherMember._id || otherMember.id) ? "Online now" : "Offline")}
+              {isGroup && `${members.length} members`}
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Messages */}
-      <div
-        ref={scrollerRef}
-        className="flex-1 overflow-y-auto px-5 py-4 scroll-smooth"
-      >
-        {isLoading ? (
-          <div className="flex h-full items-center justify-center">
-            <span className="loading loading-spinner text-primary"></span>
-          </div>
-        ) : messages.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center px-6">
-            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <MessageCircle className="h-8 w-8 text-primary" />
-            </div>
-            <h3 className="text-base font-bold text-foreground">Start a Conversation</h3>
-            <p className="text-xs text-muted-foreground mt-1 max-w-[240px]">
-              Say hello to start your chat. This user will appear in your sidebar once you send a message.
-            </p>
+      {/* Messages Scroller */}
+      <div ref={scrollerRef} className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin">
+        {messages.length === 0 && !isLoading ? (
+          <div className="flex h-full flex-col items-center justify-center text-center opacity-40">
+            <MessageCircle className="mb-4 h-12 w-12 stroke-[1.5]" />
+            <p className="text-sm font-medium">No messages yet.<br/>Start the conversation!</p>
           </div>
         ) : (
           grouped.map((group) => (
-            <div key={group.day}>
-              <div className="my-4 flex items-center gap-3 text-[11px] text-muted-foreground">
+            <div key={group.day} className="space-y-4">
+              <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/50">
                 <span className="h-px flex-1 bg-border" />
                 <span>{group.day}</span>
                 <span className="h-px flex-1 bg-border" />
@@ -151,6 +153,8 @@ export function ConversationView({
                     onEdit={() => { setEditingMessage(msg); setReplyingTo(null); setText(msg.message || msg.body); }}
                     onReply={() => { setReplyingTo(msg); setEditingMessage(null); }}
                     onForward={() => onForwardMessage && onForwardMessage(msg)}
+                    onReplyClick={(id) => scrollToMessage(id)}
+                    isHighlighted={highlightedId === (msg.id || msg._id)}
                     meId={me}
                   />
                 );
@@ -201,27 +205,13 @@ export function ConversationView({
       {/* Composer */}
       <div className="border-t border-border bg-card px-4 py-3">
         <div className="flex items-end gap-2">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-            className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
-            title="Attach"
-          >
-            {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickFile(f); e.target.value = ""; }}
-          />
           <Popover>
             <PopoverTrigger asChild>
               <button className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Emoji">
                 <Smile className="h-4 w-4" />
               </button>
             </PopoverTrigger>
-            <PopoverContent className="w-auto p-2">
+            <PopoverContent className="w-auto p-2" side="top">
               <div className="grid grid-cols-8 gap-1">
                 {EMOJIS.map((e) => (
                   <button key={e} onClick={() => setText((t) => t + e)} className="h-8 w-8 rounded hover:bg-accent">
@@ -231,11 +221,15 @@ export function ConversationView({
               </div>
             </PopoverContent>
           </Popover>
+
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
             }}
             rows={1}
             placeholder="Type a message"
@@ -256,14 +250,13 @@ export function ConversationView({
 }
 
 function MessageItem({
-  msg, mine, sender, showHeader, reactions, onReact, onDelete, onEdit, onReply, onForward, meId,
+  msg, mine, sender, showHeader, reactions, onReact, onDelete, onEdit, onReply, onForward, onReplyClick, isHighlighted, meId,
 }) {
-  console.log(sender, "from message item");
   const grouped = {};
   reactions.forEach((r) => { (grouped[r.emoji] ??= []).push(r); });
 
   return (
-    <div className={"group mb-1 flex gap-3 " + (mine ? "justify-end" : "justify-start")}>
+    <div id={`msg-${msg.id || msg._id}`} className={"group mb-1 flex gap-3 transition-all duration-500 " + (mine ? "justify-end " : "justify-start ") + (isHighlighted ? "bg-primary/10 ring-2 ring-primary/20 rounded-lg scale-[1.02] py-2 px-1" : "")}>
       {!mine && (
         <div className="w-7 shrink-0">
           {showHeader && (
@@ -276,9 +269,7 @@ function MessageItem({
         </div>
       )}
       <div className={"max-w-[70%] " + (mine ? "items-end" : "items-start")}>
-        {showHeader && !mine && (
-          <div className="mb-0.5 ml-1 text-xs text-muted-foreground">{sender?.display_name || sender?.username || "Unknown"}</div>
-        )}
+        {/* Sender name removed for direct messages */}
         <div className={"relative " + (mine ? "" : "")}>
           <div
             className={
@@ -295,25 +286,30 @@ function MessageItem({
             ) : (
               <>
                 {msg.replyTo && (
-                  <div className={"mb-2 border-l-2 border-primary/40 bg-black/5 px-2 py-1 rounded " + (mine ? "text-bubble-mine-foreground/80" : "text-bubble-theirs-foreground/80")}>
+                  <div 
+                    onClick={() => onReplyClick && onReplyClick(msg.replyTo._id || msg.replyTo.id)}
+                    className={"mb-2 cursor-pointer border-l-2 border-primary/40 bg-black/5 px-2 py-1 rounded hover:bg-black/10 transition-colors " + (mine ? "text-bubble-mine-foreground/80" : "text-bubble-theirs-foreground/80")}
+                  >
                     <div className="text-[10px] font-bold">Replying to...</div>
                     <div className="text-xs truncate italic">{msg.replyTo.message || msg.replyTo.body}</div>
                   </div>
                 )}
-                {(msg.attachment_url || msg.attachment) && (msg.attachment_type === "image" || msg.attachment?.type?.startsWith("image/")) && (
-                  <a href={msg.attachment_url || msg.attachment?.url} target="_blank" rel="noreferrer">
-                    <img src={msg.attachment_url || msg.attachment?.url} alt="" className="mb-1 max-h-72 rounded-lg" />
-                  </a>
-                )}
-                {(msg.attachment_url || msg.attachment) && (msg.attachment_type === "file" || (msg.attachment && !msg.attachment?.type?.startsWith("image/"))) && (
-                  <a href={msg.attachment_url || msg.attachment?.url} target="_blank" rel="noreferrer"
-                    className={"mb-1 flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs " + (mine ? "border-white/20 hover:bg-white/10" : "border-border hover:bg-muted")}>
-                    <FileText className="h-4 w-4" />
-                    <span className="truncate">{msg.attachment_name || msg.attachment?.name || "File"}</span>
-                    {(msg.attachment_size || msg.attachment?.size) && <span className="opacity-60">({Math.round((msg.attachment_size || msg.attachment?.size) / 1024)} KB)</span>}
-                  </a>
-                )}
-                {(msg.body || msg.message) && <div className="whitespace-pre-wrap break-words">{msg.body || msg.message}</div>}
+                <div className="relative pb-2">
+                  <div className="whitespace-pre-wrap break-words pr-20 leading-relaxed min-w-[90px]">
+                    {msg.message || msg.body}
+                  </div>
+                  <div className="absolute bottom-0 right-0 flex items-center gap-1 pb-0.5 pr-1.5 select-none">
+                    {msg.isEdited && (
+                      <span className="text-[9px] opacity-50 italic shrink-0">edited</span>
+                    )}
+                    <span className="text-[9px] opacity-50 font-medium shrink-0">
+                      {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {mine && (
+                      <CheckCheck className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                    )}
+                  </div>
+                </div>
               </>
             )}
           </div>
@@ -329,7 +325,7 @@ function MessageItem({
                 ))}
               </div>
             )}
-
+            
             {!msg.isDeleted && (
               <>
                 <button onClick={onReply} className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-muted-foreground hover:text-foreground transition-colors" title="Reply">
@@ -352,33 +348,6 @@ function MessageItem({
             )}
           </div>
         </div>
-
-        {/* Reactions */}
-        {Object.keys(grouped).length > 0 && (
-          <div className={"mt-1 flex flex-wrap gap-1 " + (mine ? "justify-end" : "justify-start")}>
-            {Object.entries(grouped).map(([emoji, rs]) => {
-              const mineReacted = rs.some((r) => r.user_id === meId || r.userId === meId);
-              return (
-                <button
-                  key={emoji}
-                  onClick={() => onReact && onReact(emoji)}
-                  className={"flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs " + (mineReacted ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:bg-accent")}
-                >
-                  <span>{emoji}</span><span>{rs.length}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        <div className={"mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground " + (mine ? "justify-end" : "justify-start")}>
-          <span>{new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-          {mine && (
-            <div className="flex items-center">
-              {msg.read ? <CheckCheck className="h-3 w-3 text-primary" /> : <Check className="h-3 w-3" />}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );
@@ -386,18 +355,16 @@ function MessageItem({
 
 function groupByDay(messages) {
   const groups = [];
-  for (const m of messages) {
-    const dateStr = m.created_at || m.createdAt;
-    if (!dateStr) continue;
-    const d = new Date(dateStr);
-    const today = new Date(); const yest = new Date(); yest.setDate(today.getDate() - 1);
-    let label;
-    if (d.toDateString() === today.toDateString()) label = "Today";
-    else if (d.toDateString() === yest.toDateString()) label = "Yesterday";
-    else label = d.toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" });
-    const last = groups[groups.length - 1];
-    if (last && last.day === label) last.items.push(m);
-    else groups.push({ day: label, items: [m] });
-  }
+  const map = {};
+  messages.forEach((m) => {
+    const d = new Date(m.created_at || m.createdAt);
+    if (isNaN(d.getTime())) return;
+    const day = d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+    if (!map[day]) {
+      map[day] = { day, items: [] };
+      groups.push(map[day]);
+    }
+    map[day].items.push(m);
+  });
   return groups;
 }

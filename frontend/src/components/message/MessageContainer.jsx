@@ -32,7 +32,7 @@ const MessageContainer = () => {
                 conversationId={selectedConverstion._id}
                 conversationName={selectedConverstion.name}
                 messages={messages}
-                onSendMessage={(body) => sendMessage(body)}
+                onSendMessage={(body, options) => sendMessage(body, options)}
                 onDeleteMessage={(id) => deleteMessage(id)}
                 currentUser={authUser}
                 members={[

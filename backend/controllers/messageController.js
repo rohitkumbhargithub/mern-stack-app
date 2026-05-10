@@ -17,6 +17,7 @@ exports.sendMessage = async (req, res) => {
                 return res.status(401).json({ error: "Unauthorized" });
             }
             existingMessage.message = message;
+            existingMessage.isEdited = true;
             await existingMessage.save();
 
             // Notify via socket

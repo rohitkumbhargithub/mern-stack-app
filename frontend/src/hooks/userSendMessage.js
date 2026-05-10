@@ -7,26 +7,33 @@ const userSendMessage = () => {
     const [loading, setLoading] = useState(false);
     const {messages, setMessages, selectedConverstion} = useConverstion();
 
-    const sendMessage = async (message) => {
+    const sendMessage = async (message, options = {}) => {
         setLoading(true);
 
-        try{
-
+        try {
             const response = await fetch(`/api/messages/send/${selectedConverstion._id}`, {
                 method: "POST",
                 headers: {
-                    'Content-Type' : 'application/json'
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({message})
+                body: JSON.stringify({
+                    message,
+                    replyTo: options.replyTo,
+                    editId: options.editId
+                })
             })
 
             const data = await response.json();
 
-            if(data.err){
+            if (data.err) {
                 throw new Error(data.err);
-                
             }
-            setMessages([...messages,data]);
+
+            if (options.editId) {
+                setMessages(messages.map(m => (m._id || m.id) === data._id ? data : m));
+            } else {
+                setMessages([...messages, data]);
+            }
 
         }catch(err){
            toast.error(err.message);
