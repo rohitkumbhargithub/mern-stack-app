@@ -9,15 +9,16 @@ const useListenMessages = () => {
   const {messages, setMessages} = useConverstion();
 
   useEffect(()=> {
-    socket?.on("newMessage", (newMessage) => {
+    const handleNewMessage = (newMessage) => {
         newMessage.shouldShake = true;
         const sound = new Audio(notification);
         sound.play();
         setMessages([...messages, newMessage]);
+    };
 
-    })
+    socket?.on("newMessage", handleNewMessage);
 
-    return () => socket.off("newMessage");
+    return () => socket?.off("newMessage", handleNewMessage);
   }, [socket, setMessages, messages]);
 }
 
