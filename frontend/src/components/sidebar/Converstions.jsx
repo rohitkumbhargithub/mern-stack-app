@@ -2,7 +2,7 @@ import React, { useMemo } from 'react'
 import Converstion from './Converstion'
 import userGetConverstions from '../../hooks/userGetConverstion'
 
-const Converstions = ({ searchFilter = "" }) => {
+const Converstions = ({ searchFilter = "", onStartNewChat }) => {
   const { loading, converstions } = userGetConverstions();
 
   const filteredConversations = useMemo(() => {
@@ -29,8 +29,14 @@ const Converstions = ({ searchFilter = "" }) => {
       ) : null}
       
       {!loading && filteredConversations.length === 0 && (
-        <div className="px-4 py-8 text-center text-xs text-muted-foreground italic">
-          No matches found
+        <div className="px-4 py-8 text-center">
+          <p className="text-xs text-muted-foreground italic mb-3">No conversations yet</p>
+          <button
+            onClick={() => onStartNewChat && onStartNewChat()}
+            className="w-full rounded-lg bg-primary/10 px-3 py-2 text-xs font-semibold text-primary hover:bg-primary/20 transition-colors"
+          >
+            Start a new chat
+          </button>
         </div>
       )}
     </div>

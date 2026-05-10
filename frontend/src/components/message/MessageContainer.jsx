@@ -16,6 +16,8 @@ const MessageContainer = () => {
     useListenMessages();
     const { sendMessage, loading: sendLoading } = userSendMessage();
 
+    console.log("MessageContainer rendering. Selected:", selectedConverstion?._id);
+
     useEffect(() => {
         return () => setSelectedConverstion(null);
     }, [setSelectedConverstion]);

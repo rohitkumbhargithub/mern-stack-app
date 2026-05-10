@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import toast from 'react-hot-toast';
+import useConverstion from "../zustand/useConverstion";
 
 const userGetConverstions = () => {
 
     const [loading, setLoading] = useState(false);
     const [converstions, setConverstions] = useState([]);
+    const { messages } = useConverstion();
 
 
     useEffect(() => {
@@ -27,7 +29,7 @@ const userGetConverstions = () => {
             }
         }
         getConverstion();
-    }, []);
+    }, [messages]);
 
     return {loading, converstions};
 }

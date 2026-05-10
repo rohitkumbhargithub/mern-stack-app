@@ -4,16 +4,34 @@ import { MessageCircle, Plus, Settings, LogOut, Search } from 'lucide-react';
 import { NewChatDialog } from '../chat/NewChatDialog';
 import userLogout from '../../hooks/userLogout';
 import { useNavigate } from 'react-router-dom';
+import useConverstion from '../../zustand/useConverstion';
 
 const SideBar = () => {
     const [newChatOpen, setNewChatOpen] = useState(false);
     const [search, setSearch] = useState("");
+    const [searchResults, setSearchResults] = useState([]);
+    const [searchLoading, setSearchLoading] = useState(false);
     const { logout } = userLogout();
     const navigate = useNavigate();
+    const { setSelectedConverstion } = useConverstion();
 
     const handleLogout = async () => {
         await logout();
         navigate("/login");
+    };
+
+    const handleSearchUsers = async (query) => {
+        setSearchLoading(true);
+        try {
+            const res = await fetch(`/api/users/search?q=${encodeURIComponent(query || "")}`);
+            const data = await res.json();
+            if (data.err) throw new Error(data.err);
+            setSearchResults(data);
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setSearchLoading(false);
+        }
     };
 
     return (
@@ -61,14 +79,23 @@ const SideBar = () => {
             </div>
 
             <div className='flex-1 overflow-y-auto px-2 pb-2'>
-                <Converstions searchFilter={search} />
+                <Converstions 
+                    searchFilter={search} 
+                    onStartNewChat={() => setNewChatOpen(true)}
+                />
             </div>
 
             <NewChatDialog
                 open={newChatOpen}
                 onOpenChange={setNewChatOpen}
+                onSearch={handleSearchUsers}
+                searchResults={searchResults}
+                isLoading={searchLoading}
                 onStartChat={(type, data) => {
-                    console.log("Start chat:", type, data);
+                    console.log("onStartChat triggered in SideBar:", type, data);
+                    if (type === "dm") {
+                        setSelectedConverstion(data);
+                    }
                     setNewChatOpen(false);
                 }}
             />

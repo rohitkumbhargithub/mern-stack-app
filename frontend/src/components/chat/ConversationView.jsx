@@ -1,16 +1,16 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { toast } from "sonner";
-import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, FileText, Image as ImageIcon, Loader2, MessageCircle } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
 } from "@/components/ui/popover";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "✅"];
 
-export function ConversationView({ 
-  conversationId, 
-  messages = [], 
-  onSendMessage, 
+export function ConversationView({
+  conversationId,
+  messages = [],
+  onSendMessage,
   onFileUpload,
   onReact,
   currentUser,
@@ -44,9 +44,9 @@ export function ConversationView({
   const otherMember = members.find((m) => (m.id || m._id) !== me);
   const isGroup = members.length > 2;
 
-  const title = isGroup 
-    ? "Group Chat" 
-    : otherMember?.display_name || otherMember?.username || "Direct Message";
+  const title = isGroup
+    ? "Group Chat"
+    : otherMember?.name || otherMember?.display_name || otherMember?.username || "Direct Message";
 
   const subtitle = isGroup
     ? `${members.length} members`
@@ -57,7 +57,7 @@ export function ConversationView({
   const handleSend = async (override) => {
     const body = override?.body ?? text.trim();
     if (!body && !override?.attachment_url) return;
-    
+
     if (onSendMessage) {
       setSending(true);
       await onSendMessage(body, override);
@@ -69,7 +69,7 @@ export function ConversationView({
   const onPickFile = async (file) => {
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) return toast.error("Max 20 MB");
-    
+
     if (onFileUpload) {
       setUploading(true);
       await onFileUpload(file);
@@ -95,40 +95,54 @@ export function ConversationView({
       </div>
 
       {/* Messages */}
-      <div ref={scrollerRef} className="flex-1 overflow-y-auto px-5 py-4">
-        {grouped.map((group) => (
-          <div key={group.day}>
-            <div className="my-4 flex items-center gap-3 text-[11px] text-muted-foreground">
-              <span className="h-px flex-1 bg-border" />
-              <span>{group.day}</span>
-              <span className="h-px flex-1 bg-border" />
+      <div
+        ref={scrollerRef}
+        className="flex-1 overflow-y-auto px-5 py-4 scroll-smooth"
+      >
+        {isLoading ? (
+          <div className="flex h-full items-center justify-center">
+            <span className="loading loading-spinner text-primary"></span>
+          </div>
+        ) : messages.length === 0 ? (
+          <div className="flex h-full flex-col items-center justify-center text-center px-6">
+            <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+              <MessageCircle className="h-8 w-8 text-primary" />
             </div>
-            {group.items.map((msg, i) => {
-              const prev = group.items[i - 1];
-              const msgDate = new Date(msg.created_at || msg.createdAt);
-              const prevDate = prev ? new Date(prev.created_at || prev.createdAt) : null;
-              const senderId = String(msg.sender_id || msg.sender || msg.senderId || "");
-              const showHeader = !prev || String(prev.sender_id || prev.sender || prev.senderId || "") !== senderId || (msgDate.getTime() - prevDate.getTime()) > 5 * 60 * 1000;
-              
-              return (
-                <MessageItem
-                  key={msg.id || msg._id}
-                  msg={msg}
-                  mine={senderId === me}
-                  sender={memberMap.get(senderId)}
-                  showHeader={showHeader}
-                  reactions={msg.reactions || []}
-                  onReact={(e) => onReact && onReact(msg.id || msg._id, e)}
-                  meId={me}
-                />
-              );
-            })}
+            <h3 className="text-base font-bold text-foreground">Start a Conversation</h3>
+            <p className="text-xs text-muted-foreground mt-1 max-w-[240px]">
+              Say hello to start your chat. This user will appear in your sidebar once you send a message.
+            </p>
           </div>
-        ))}
-        {messages.length === 0 && !isLoading && (
-          <div className="grid h-full place-items-center text-center text-sm text-muted-foreground">
-            Say hi 👋
-          </div>
+        ) : (
+          grouped.map((group) => (
+            <div key={group.day}>
+              <div className="my-4 flex items-center gap-3 text-[11px] text-muted-foreground">
+                <span className="h-px flex-1 bg-border" />
+                <span>{group.day}</span>
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              {group.items.map((msg, i) => {
+                const prev = group.items[i - 1];
+                const msgDate = new Date(msg.created_at || msg.createdAt);
+                const prevDate = prev ? new Date(prev.created_at || prev.createdAt) : null;
+                const senderId = String(msg.sender_id || msg.sender || msg.senderId || "");
+                const showHeader = !prev || String(prev.sender_id || prev.sender || prev.senderId || "") !== senderId || (msgDate.getTime() - prevDate.getTime()) > 5 * 60 * 1000;
+
+                return (
+                  <MessageItem
+                    key={msg.id || msg._id}
+                    msg={msg}
+                    mine={senderId === me}
+                    sender={memberMap.get(senderId)}
+                    showHeader={showHeader}
+                    reactions={msg.reactions || []}
+                    onReact={(e) => onReact && onReact(msg.id || msg._id, e)}
+                    meId={me}
+                  />
+                );
+              })}
+            </div>
+          ))
         )}
       </div>
 
@@ -210,8 +224,8 @@ function MessageItem({
             sender?.avatar_url || sender?.profilePic
               ? <img src={sender.avatar_url || sender.profilePic} className="mt-1 h-7 w-7 rounded-full object-cover" alt="" />
               : <div className="mt-1 grid h-7 w-7 place-items-center rounded-full bg-primary/10 text-[10px] font-medium text-primary">
-                  {(sender?.display_name || sender?.username || "?").slice(0, 2).toUpperCase()}
-                </div>
+                {(sender?.display_name || sender?.username || "?").slice(0, 2).toUpperCase()}
+              </div>
           )}
         </div>
       )}
@@ -238,7 +252,7 @@ function MessageItem({
                 className={"mb-1 flex items-center gap-2 rounded-lg border px-2 py-1.5 text-xs " + (mine ? "border-white/20 hover:bg-white/10" : "border-border hover:bg-muted")}>
                 <FileText className="h-4 w-4" />
                 <span className="truncate">{msg.attachment_name || msg.attachment?.name || "File"}</span>
-                {(msg.attachment_size || msg.attachment?.size) && <span className="opacity-60">({Math.round((msg.attachment_size || msg.attachment?.size)/1024)} KB)</span>}
+                {(msg.attachment_size || msg.attachment?.size) && <span className="opacity-60">({Math.round((msg.attachment_size || msg.attachment?.size) / 1024)} KB)</span>}
               </a>
             )}
             {(msg.body || msg.message) && <div className="whitespace-pre-wrap break-words">{msg.body || msg.message}</div>}
