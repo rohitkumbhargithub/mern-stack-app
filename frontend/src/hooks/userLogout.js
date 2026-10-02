@@ -1,42 +1,37 @@
-import { useState } from 'react'
+import { useState } from 'react';
 import { useAuthContext } from '../context/AuthContext';
-import toast from 'react-hot-toast';
+import useConverstion from '../zustand/useConverstion';
+import { toast } from 'sonner';
 
 const userLogout = () => {
   const [loading, setLoading] = useState(false);
-  const {setAuthUser} = useAuthContext();
+  const { setAuthUser } = useAuthContext();
+  const { setSelectedConverstion } = useConverstion();
 
   const logout = async () => {
     setLoading(true);
 
-    try{
-
-        const response = await fetch("/api/auth/logout", {
-            method: "POST",
-            headers: {
-                'Content-type': 'application/json'
-            },
-        });
-
-        // Safely parse the response - body may be empty or non-JSON
-        const text = await response.text();
-        const data = text ? JSON.parse(text) : {};
-
-        if(!response.ok){
-            throw new Error(data.error || data.err || "Logout failed");
-        }
-
-        localStorage.removeItem("chat-user");
-        setAuthUser(null);
-
-    }catch(error){
-        toast.error(error.message);
-    }finally{
-        setLoading(false);
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          'Content-type': 'application/json'
+        },
+      });
+    } catch (error) {
+      console.warn("Backend logout notification failed:", error.message);
+    } finally {
+      // Unconditionally remove local storage session and state
+      localStorage.removeItem("chat-user");
+      setSelectedConverstion(null);
+      setAuthUser(null);
+      setLoading(false);
+      toast.success("Logged out successfully");
     }
-  }
+  };
 
-  return {loading, logout};
+  return { loading, logout };
 };
 
 export default userLogout;

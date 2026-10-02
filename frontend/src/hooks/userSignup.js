@@ -1,5 +1,5 @@
 import { useState } from "react"
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import { useAuthContext } from "../context/AuthContext";
 
 const userSignup = () => {
@@ -28,7 +28,7 @@ const userSignup = () => {
             const data = text ? JSON.parse(text) : {};
 
             if(!response.ok){
-                throw new Error(data.error || data.err || "Signup failed");
+                throw new Error(data.error || "Signup failed");
             }
 
             // localstorage 
