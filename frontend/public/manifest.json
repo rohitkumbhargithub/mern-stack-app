@@ -1,0 +1,19 @@
+{
+  "name": "SendChat - AI Real-Time Chat",
+  "short_name": "SendChat",
+  "description": "Secure Real-Time AI Encrypted Messaging Application",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#090d16",
+  "theme_color": "#2563eb",
+  "orientation": "portrait",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/vite.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

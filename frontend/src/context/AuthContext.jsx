@@ -1,14 +1,66 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
 
-export const AuthContext = createContext();
+export const AuthContext = createContext({
+  authUser: null,
+  setAuthUser: () => {},
+  logout: () => {},
+});
 
-// eslint-disable-next-line react-refresh/only-export-components
 export const useAuthContext = () => {
-	return useContext(AuthContext);
+  return useContext(AuthContext);
+};
+
+/**
+ * Safely parse persisted user session from localStorage
+ */
+const getInitialUser = () => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem("chat-user");
+    if (!raw || raw === "undefined" || raw === "null") return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || (!parsed._id && !parsed.id)) return null;
+    return parsed;
+  } catch (err) {
+    console.warn("Corrupted session detected in localStorage, resetting:", err);
+    localStorage.removeItem("chat-user");
+    return null;
+  }
 };
 
 export const AuthContextProvider = ({ children }) => {
-	const [authUser, setAuthUser] = useState(JSON.parse(localStorage.getItem("chat-user")) || null);
+  const [authUser, setAuthUser] = useState(getInitialUser);
 
-	return <AuthContext.Provider value={{ authUser, setAuthUser }}>{children}</AuthContext.Provider>;
+  const logout = useCallback(async () => {
+    try {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } catch (err) {
+      console.warn("Logout request failed:", err);
+    } finally {
+      // Guaranteed local session cleanup
+      localStorage.removeItem("chat-user");
+      setAuthUser(null);
+    }
+  }, []);
+
+  // Listen for global 401 unauthorized session expiry events
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      console.warn("Session expired or invalid, logging out...");
+      localStorage.removeItem("chat-user");
+      setAuthUser(null);
+    };
+
+    window.addEventListener("auth:unauthorized", handleUnauthorized);
+    return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
+  }, []);
+
+  return (
+    <AuthContext.Provider value={{ authUser, setAuthUser, logout }}>
+      {children}
+    </AuthContext.Provider>
+  );
 };

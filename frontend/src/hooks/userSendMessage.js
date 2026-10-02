@@ -1,6 +1,6 @@
 import { useState } from "react";
 import useConverstion from "../zustand/useConverstion";
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 
 const userSendMessage = () => {
   
@@ -11,11 +11,15 @@ const userSendMessage = () => {
         setLoading(true);
 
         try {
+            const headers = { 'Content-Type': 'application/json' };
+            const customKey = localStorage.getItem("gemini_api_key");
+            if (customKey && customKey.trim()) {
+                headers['x-gemini-api-key'] = customKey.trim();
+            }
+
             const response = await fetch(`/api/messages/send/${selectedConverstion._id}`, {
                 method: "POST",
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers,
                 body: JSON.stringify({
                     message,
                     replyTo: options.replyTo,
@@ -25,8 +29,8 @@ const userSendMessage = () => {
 
             const data = await response.json();
 
-            if (data.err) {
-                throw new Error(data.err);
+            if (data.error) {
+                throw new Error(data.error);
             }
 
             if (options.editId) {

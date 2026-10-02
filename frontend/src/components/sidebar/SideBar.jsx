@@ -1,42 +1,47 @@
 import React, { useState, useCallback } from 'react'
 import Converstions from './Converstions'
-import { MessageCircle, Plus, Settings, LogOut, Search } from 'lucide-react';
+import { MessageCircle, Plus, Settings, LogOut, Search, PanelLeftClose } from 'lucide-react';
 import { NewChatDialog } from '../chat/NewChatDialog';
+import { SettingsDialog } from '../chat/SettingsDialog';
 import userLogout from '../../hooks/userLogout';
 import { useNavigate } from 'react-router-dom';
 import useConverstion from '../../zustand/useConverstion';
 
+import api from '../../lib/api';
+import { toast } from 'sonner';
+
 const SideBar = () => {
     const [newChatOpen, setNewChatOpen] = useState(false);
+    const [settingsOpen, setSettingsOpen] = useState(false);
     const [search, setSearch] = useState("");
     const [searchResults, setSearchResults] = useState([]);
     const [searchLoading, setSearchLoading] = useState(false);
     const { logout } = userLogout();
     const navigate = useNavigate();
-    const { setSelectedConverstion } = useConverstion();
+    const { setSelectedConverstion, toggleSidebar } = useConverstion();
 
     const handleLogout = async () => {
         await logout();
         navigate("/login");
     };
 
-    const handleSearchUsers = useCallback(async (query) => {
-        if (!query.trim()) {
-            setSearchResults([]);
-            return;
-        }
+    const handleSearchUsers = useCallback(async (query = "") => {
         setSearchLoading(true);
         try {
-            const res = await fetch(`/api/users/search?q=${encodeURIComponent(query || "")}`);
-            const data = await res.json();
-            if (data.err) throw new Error(data.err);
-            setSearchResults(data);
+            const data = await api.get(`/api/users/search?q=${encodeURIComponent(query || "")}`);
+            setSearchResults(Array.isArray(data) ? data : []);
         } catch (err) {
-            console.error(err);
+            console.error("Search users error:", err);
+            setSearchResults([]);
         } finally {
             setSearchLoading(false);
         }
     }, []);
+
+    const handleOpenNewChat = () => {
+        setNewChatOpen(true);
+        handleSearchUsers("");
+    };
 
     return (
         <div className='flex flex-col h-full border-r border-border bg-card'>
@@ -47,16 +52,27 @@ const SideBar = () => {
                         <MessageCircle className="h-3.5 w-3.5" />
                     </span>
                     SendChat
+                    <button
+                        onClick={toggleSidebar}
+                        title="Collapse sidebar"
+                        className="hidden md:inline-flex rounded-md p-1 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors ml-0.5"
+                    >
+                        <PanelLeftClose className="h-3.5 w-3.5" />
+                    </button>
                 </div>
                 <div className="flex items-center gap-1">
                     <button
-                        onClick={() => setNewChatOpen(true)}
+                        onClick={handleOpenNewChat}
                         title="New chat"
                         className="rounded-md p-1.5 hover:bg-accent text-muted-foreground transition-colors"
                     >
                         <Plus className="h-4 w-4" />
                     </button>
-                    <button className="rounded-md p-1.5 hover:bg-accent text-muted-foreground transition-colors" title="Settings">
+                    <button 
+                        onClick={() => setSettingsOpen(true)}
+                        className="rounded-md p-1.5 hover:bg-accent text-muted-foreground transition-colors" 
+                        title="Settings"
+                    >
                         <Settings className="h-4 w-4" />
                     </button>
                     <button
@@ -85,23 +101,46 @@ const SideBar = () => {
             <div className='flex-1 overflow-y-auto px-2 pb-2'>
                 <Converstions
                     searchFilter={search}
-                    onStartNewChat={() => setNewChatOpen(true)}
+                    onStartNewChat={handleOpenNewChat}
                 />
             </div>
 
             <NewChatDialog
                 open={newChatOpen}
-                onOpenChange={setNewChatOpen}
+                onOpenChange={(isOpen) => {
+                    setNewChatOpen(isOpen);
+                    if (isOpen) handleSearchUsers("");
+                }}
                 onSearch={handleSearchUsers}
                 searchResults={searchResults}
                 isLoading={searchLoading}
-                onStartChat={(type, data) => {
-                    console.log("onStartChat triggered in SideBar:", type, data);
+                onStartChat={async (type, data) => {
                     if (type === "dm") {
                         setSelectedConverstion(data);
+                        setNewChatOpen(false);
+                    } else if (type === "group") {
+                        try {
+                            setSearchLoading(true);
+                            const newGroup = await api.post("/api/users/group", {
+                                name: data.name,
+                                members: data.members,
+                                groupAvatar: data.groupAvatar
+                            });
+                            toast.success(`Group "${data.name}" created!`);
+                            setSelectedConverstion(newGroup);
+                            setNewChatOpen(false);
+                        } catch (err) {
+                            toast.error(err.message || "Failed to create group");
+                        } finally {
+                            setSearchLoading(false);
+                        }
                     }
-                    setNewChatOpen(false);
                 }}
+            />
+
+            <SettingsDialog 
+                open={settingsOpen}
+                onOpenChange={setSettingsOpen}
             />
         </div>
     )

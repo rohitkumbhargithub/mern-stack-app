@@ -1,6 +1,8 @@
 const Converastion = require("../models/converastions");
 const Message = require("../models/messages");
-const { getReceiverSocketId, io } = require("../socket/socket");
+const { getReceiverSocketIds, io } = require("../socket/socket");
+const { isAIBotId, handleAIBotResponse, getOrCreateAIBotUser } = require("../utils/aiBot");
+const { decrypt } = require("../utils/crypto");
 
 
 exports.sendMessage = async (req, res) => {
@@ -8,6 +10,7 @@ exports.sendMessage = async (req, res) => {
         const { message, replyTo, editId } = req.body;
         const { id: targetId } = req.params;
         const senderId = req.user._id;
+        const userApiKey = req.headers["x-gemini-api-key"] || (req.user?.aiSettings?.geminiApiKey ? decrypt(req.user.aiSettings.geminiApiKey) : null);
 
         // If editing an existing message
         if (editId) {
@@ -63,22 +66,39 @@ exports.sendMessage = async (req, res) => {
         }
 
         // Socket functionality
-        if (conversation.isGroupChat) {
-            io.to(conversation._id.toString()).emit("newMessage", newMessage);
-        } else {
-            conversation.participated.forEach(pId => {
-                const socketId = getReceiverSocketId(pId);
-                if (socketId) {
-                    io.to(socketId).emit("newMessage", newMessage);
-                }
+        const convRoom = conversation._id.toString();
+        io.to(convRoom).emit("newMessage", newMessage);
+
+        // Also emit directly to individual sockets for background notification
+        conversation.participated.forEach(pId => {
+            const socketIds = getReceiverSocketIds(pId);
+            socketIds.forEach(socketId => {
+                io.to(socketId).emit("newMessage", newMessage);
             });
+        });
+
+        // Check if message is directed to AI Bot or contains @ai
+        const aiBot = await getOrCreateAIBotUser();
+        const isDirectWithAI = aiBot && conversation.participated.some(p => p.toString() === aiBot._id.toString());
+        const isAIMention = message.trim().toLowerCase().startsWith("@ai");
+
+        if (isDirectWithAI || isAIMention) {
+            // Asynchronously generate AI response so HTTP response isn't blocked
+            setTimeout(() => {
+                handleAIBotResponse({
+                    conversation,
+                    senderUser: req.user,
+                    userMessage: message,
+                    userApiKey
+                });
+            }, 500);
         }
 
         res.status(200).json(newMessage);
 
     } catch (err) {
         console.log('send Message ', err);
-        res.status(500).json({ err: "Internal server error" });
+        res.status(500).json({ error: "Internal server error" });
     }
 }
 
@@ -89,32 +109,34 @@ exports.getMessage = async (req, res, next) => {
         const { id: targetId } = req.params;
         const senderId = req.user._id;
 
-        console.log(targetId, "from resrsre")
-
-        // Try finding by conversation ID first (works for groups and existing 1-on-1s)
-        let conversation = await Converastion.findById(targetId).populate({
-            path: "messages",
-            populate: { path: "replyTo" }
-        });
+        // Try finding conversation by ID or by participants
+        let convId = targetId;
+        const conversation = await Converastion.findById(targetId).select("_id").lean();
 
         if (!conversation) {
-            // Fallback: Try finding 1-on-1 by other user's ID
-            conversation = await Converastion.findOne({
+            const fallbackConv = await Converastion.findOne({
                 participated: { $all: [senderId, targetId] },
                 isGroupChat: false
-            }).populate({
-                path: "messages",
-                populate: { path: "replyTo" }
-            });
+            }).select("_id").lean();
+
+            if (!fallbackConv) return res.status(200).json([]);
+            convId = fallbackConv._id;
         }
 
-        if (!conversation) return res.status(200).json([]);
+        // Optimized query: utilizes compound index { conversationId: 1, createdAt: 1 } with .lean()
+        const messages = await Message.find({ conversationId: convId })
+            .sort({ createdAt: 1 })
+            .populate({
+                path: "replyTo",
+                select: "message senderId createdAt"
+            })
+            .lean();
 
-        res.status(200).json(conversation.messages);
+        res.status(200).json(messages);
 
     } catch (err) {
-        console.log("get message ", err)
-        res.status(500).json({ err: "Internal server error" });
+        console.log("get message ", err);
+        res.status(500).json({ error: "Internal server error" });
     }
 }
 
@@ -143,10 +165,10 @@ exports.deleteMessage = async (req, res) => {
                 io.to(conversation._id.toString()).emit("messageDeleted", { messageId, conversationId: conversation._id });
             } else {
                 conversation.participated.forEach(pId => {
-                    const socketId = getReceiverSocketId(pId);
-                    if (socketId) {
+                    const socketIds = getReceiverSocketIds(pId);
+                    socketIds.forEach(socketId => {
                         io.to(socketId).emit("messageDeleted", { messageId, conversationId: conversation._id });
-                    }
+                    });
                 });
             }
         }

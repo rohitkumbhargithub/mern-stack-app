@@ -1,12 +1,12 @@
 const mongoose = require('mongoose');
 
 const messageSchema = new mongoose.Schema({
-    senderId : {
+    senderId: {
         type: mongoose.Schema.ObjectId,
         ref: "User",
         required: true
     },
-    recieverId : {
+    recieverId: {
         type: mongoose.Schema.ObjectId,
         ref: "User",
     },
@@ -15,7 +15,7 @@ const messageSchema = new mongoose.Schema({
         ref: "Converastion",
         required: true
     },
-    message : {
+    message: {
         type: String,
         required: true
     },
@@ -31,9 +31,14 @@ const messageSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     }
-},{
+}, {
     timestamps: true
 });
+
+// Indexes for high performance querying & sorting
+messageSchema.index({ conversationId: 1, createdAt: 1 });
+messageSchema.index({ senderId: 1 });
+messageSchema.index({ createdAt: -1 });
 
 const Message = mongoose.model('Message', messageSchema);
 

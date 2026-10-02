@@ -18,11 +18,30 @@ const userSchema = new mongoose.Schema({
         required: true,
         enum: ['male', 'female']
     },
-    profile : {
+    profile: {
         type: String,
         default: ""
+    },
+    aiSettings: {
+        geminiApiKey: {
+            type: String,
+            default: ""
+        },
+        openaiApiKey: {
+            type: String,
+            default: ""
+        },
+        preferredProvider: {
+            type: String,
+            enum: ['gemini', 'openai'],
+            default: 'gemini'
+        },
+        preferredLanguage: {
+            type: String,
+            default: 'English'
+        }
     }
-},{
+}, {
     timestamps: true
 });
 

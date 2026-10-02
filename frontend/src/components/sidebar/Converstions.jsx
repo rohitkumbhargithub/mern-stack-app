@@ -5,13 +5,15 @@ import userGetConverstions from '../../hooks/userGetConverstion'
 const Converstions = ({ searchFilter = "", onStartNewChat }) => {
   const { loading, converstions } = userGetConverstions();
 
+  const safeList = Array.isArray(converstions) ? converstions : [];
+
   const filteredConversations = useMemo(() => {
-    if (!searchFilter.trim()) return converstions;
+    if (!searchFilter.trim()) return safeList;
     const q = searchFilter.toLowerCase();
-    return converstions.filter((c) => 
-      (c.name || "").toLowerCase().includes(q)
+    return safeList.filter((c) => 
+      (c?.name || "").toLowerCase().includes(q)
     );
-  }, [searchFilter, converstions]);
+  }, [searchFilter, safeList]);
   
   return (
     <div className='flex flex-col overflow-auto py-1'>

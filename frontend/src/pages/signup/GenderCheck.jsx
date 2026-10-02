@@ -1,27 +1,58 @@
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Check } from "lucide-react";
 
-const GenderCheck = ({onCheckboxChange, selectedGender}) => {
+const GenderCheck = ({ onCheckboxChange, selectedGender }) => {
   return (
-    <div className='flex gap-6 mt-1 mb-2'>
-        <div className='flex items-center space-x-2'>
-            <Checkbox 
-                id="male"
-                checked={selectedGender === 'male'}
-                onCheckedChange={() => onCheckboxChange('male')}
-            />
-            <Label htmlFor="male" className="cursor-pointer text-sm font-medium">Male</Label>
-        </div>
-        <div className='flex items-center space-x-2'>
-            <Checkbox 
-                id="female"
-                checked={selectedGender === 'female'}
-                onCheckedChange={() => onCheckboxChange('female')}
-            />
-            <Label htmlFor="female" className="cursor-pointer text-sm font-medium">Female</Label>
-        </div>
+    <div className="space-y-1.5">
+      <label className="block text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Gender (for default avatar)
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => onCheckboxChange("male")}
+          className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all duration-200 ${
+            selectedGender === "male"
+              ? "border-primary bg-primary/10 text-primary shadow-sm ring-1 ring-primary"
+              : "border-border/70 hover:border-border hover:bg-muted/50 text-muted-foreground"
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-base">👨</span>
+            <span>Male</span>
+          </div>
+          {selectedGender === "male" ? (
+            <div className="w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+              <Check className="w-3 h-3 stroke-[3]" />
+            </div>
+          ) : (
+            <div className="w-4 h-4 rounded-full border border-border" />
+          )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => onCheckboxChange("female")}
+          className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl border text-sm font-medium transition-all duration-200 ${
+            selectedGender === "female"
+              ? "border-primary bg-primary/10 text-primary shadow-sm ring-1 ring-primary"
+              : "border-border/70 hover:border-border hover:bg-muted/50 text-muted-foreground"
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="text-base">👩</span>
+            <span>Female</span>
+          </div>
+          {selectedGender === "female" ? (
+            <div className="w-4 h-4 rounded-full bg-primary text-primary-foreground flex items-center justify-center">
+              <Check className="w-3 h-3 stroke-[3]" />
+            </div>
+          ) : (
+            <div className="w-4 h-4 rounded-full border border-border" />
+          )}
+        </button>
+      </div>
     </div>
-  )
-}
+  );
+};
 
 export default GenderCheck;

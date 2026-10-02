@@ -21,4 +21,18 @@ export default defineConfig({
       },
     },
   },
+
+  build: {
+    target: "esnext",
+    chunkSizeWarningLimit: 700,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-ui': ['lucide-react', 'sonner', 'zustand'],
+          'vendor-socket': ['socket.io-client'],
+        },
+      },
+    },
+  },
 })

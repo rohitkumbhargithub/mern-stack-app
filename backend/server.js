@@ -8,6 +8,7 @@ const PORT = process.env.PORT || 8000;
 const authRoutes = require('./routes/authRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const userRoutes = require('./routes/userRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 const connectToDb = require('./db/mongoose');
 const { app, server } = require('./socket/socket');
 
@@ -18,6 +19,7 @@ app.use(cookieParser());
 app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/ai', aiRoutes);
 
 app.use(express.static(path.join(__variableOfChoice,"/frontend/dist")));
 

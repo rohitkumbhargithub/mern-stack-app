@@ -1,40 +1,41 @@
 import { useEffect, useState } from "react";
-
-import toast from "react-hot-toast";
+import { toast } from "sonner";
 import useConverstion from "../zustand/useConverstion";
+import { api } from "../lib/api";
 
 const userGetMessages = () => {
     const [loading, setLoading] = useState(false);
     const { messages, setMessages, selectedConverstion } = useConverstion();
-    console.log("Selected converstion from useGetMessages:", selectedConverstion?._id);
 
     useEffect(() => {
+        let isCurrent = true;
         const getMessages = async () => {
+            if (!selectedConverstion?._id) return;
             setLoading(true);
-            setMessages([]); // Clear old messages immediately
+            setMessages([]);
 
             try {
-                const response = await fetch(`/api/messages/${selectedConverstion._id}`);
-                const data = await response.json();
-
-                if (data.err) {
-                    throw new Error(data.err);
+                const data = await api.get(`/api/messages/${selectedConverstion._id}`);
+                if (isCurrent) {
+                    setMessages(Array.isArray(data) ? data : []);
                 }
-
-                setMessages(data);
-
             } catch (err) {
-                toast.error(err.message);
+                if (isCurrent) {
+                    setMessages([]);
+                    if (err.status !== 401) {
+                        toast.error(err.message || "Failed to load messages");
+                    }
+                }
             } finally {
-                setLoading(false);
+                if (isCurrent) setLoading(false);
             }
-        }
+        };
 
-        if (selectedConverstion?._id) getMessages();
-
+        getMessages();
+        return () => { isCurrent = false; };
     }, [selectedConverstion?._id, setMessages]);
 
-    return { messages, loading };
+    return { messages: Array.isArray(messages) ? messages : [], loading };
 };
 
 export default userGetMessages;
