@@ -107,14 +107,14 @@ exports.login = async (req, res) => {
             { upsert: true, new: true }
         );
 
-        // Send OTP email
-        await sendLoginOtpEmail({
+        // Dispatch OTP email asynchronously so HTTP response is instant (< 50ms)
+        sendLoginOtpEmail({
             email: user.email,
             name: user.name,
             otp: otpCode,
-        });
+        }).catch(err => console.error("Async login OTP email error:", err));
 
-        // Return challenge response (session cookie NOT issued yet)
+        // Return challenge response immediately (session cookie NOT issued yet)
         return res.status(200).json({
             requireOtp: true,
             email: user.email,
@@ -240,11 +240,12 @@ exports.resendOtp = async (req, res) => {
             { upsert: true, new: true }
         );
 
-        await sendLoginOtpEmail({
+        // Dispatch email asynchronously so HTTP response is instant (< 50ms)
+        sendLoginOtpEmail({
             email: user.email,
             name: user.name,
             otp: otpCode,
-        });
+        }).catch(err => console.error("Async resend OTP email error:", err));
 
         return res.status(200).json({
             message: "A fresh verification code has been dispatched to your email.",

@@ -1,11 +1,10 @@
 const nodemailer = require('nodemailer');
 
 /**
- * Configure email transporter
+ * Configure standard SMTP transporter
  * Supports:
- * 1. Standard SMTP (SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS)
- * 2. Gmail App Password (GMAIL_USER, GMAIL_PASS)
- * 3. Fallback Development Mode (logs OTP directly in server console with formatted preview)
+ * 1. Gmail App Password (SMTP_HOST=smtp.gmail.com)
+ * 2. Standard SMTP (Brevo, Mailtrap, SendGrid, Amazon SES)
  */
 const createTransporter = () => {
     const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, GMAIL_USER, GMAIL_PASS } = process.env;
@@ -18,7 +17,7 @@ const createTransporter = () => {
     }
 
     const cleanUser = rawUser.trim();
-    // Google App Passwords often contain spaces (e.g. "fveg kytz gbso ocwh"). Sanitize to 16 continuous chars.
+    // Google App Passwords often contain spaces (e.g. "wfke iowx nskn fbsz"). Sanitize to 16 continuous chars.
     const cleanPass = rawPass.replace(/\s+/g, '').trim();
 
     // If host is Gmail or GMAIL_USER is provided, use nodemailer's dedicated Gmail service profile
@@ -29,6 +28,9 @@ const createTransporter = () => {
                 user: cleanUser,
                 pass: cleanPass,
             },
+            connectionTimeout: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 10000,
         });
     }
 
@@ -42,6 +44,9 @@ const createTransporter = () => {
                 user: cleanUser,
                 pass: cleanPass,
             },
+            connectionTimeout: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 10000,
             tls: {
                 rejectUnauthorized: false,
             },
@@ -49,6 +54,66 @@ const createTransporter = () => {
     }
 
     return null;
+};
+
+/**
+ * Send email via Resend HTTP API (HTTPS port 443 - 100% permitted on Render Free Tier!)
+ */
+const sendViaResend = async ({ email, name, otp, htmlContent }) => {
+    const resendApiKey = process.env.RESEND_API_KEY;
+    if (!resendApiKey) return null;
+
+    const from = process.env.RESEND_FROM || "SendChat Security <onboarding@resend.dev>";
+    const res = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${resendApiKey.trim()}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            from: from,
+            to: [email],
+            subject: `🔐 ${otp} is your SendChat verification code`,
+            text: `Your SendChat verification code is: ${otp}. It expires in 5 minutes. Do not share it with anyone.`,
+            html: htmlContent
+        })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+        throw new Error(data.message || `Resend HTTP error ${res.status}`);
+    }
+    return data;
+};
+
+/**
+ * Send email via Brevo (Sendinblue) HTTP API (HTTPS port 443 - 100% permitted on Render Free Tier!)
+ */
+const sendViaBrevo = async ({ email, name, otp, htmlContent }) => {
+    const brevoApiKey = process.env.BREVO_API_KEY;
+    if (!brevoApiKey) return null;
+
+    const senderEmail = process.env.BREVO_SENDER || process.env.SMTP_USER || "robitkumbhar956@gmail.com";
+    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
+        method: "POST",
+        headers: {
+            "api-key": brevoApiKey.trim(),
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+            sender: { name: "SendChat Security", email: senderEmail },
+            to: [{ email, name: name || "User" }],
+            subject: `🔐 ${otp} is your SendChat verification code`,
+            textContent: `Your SendChat verification code is: ${otp}. It expires in 5 minutes. Do not share it with anyone.`,
+            htmlContent: htmlContent
+        })
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+        throw new Error(data.message || `Brevo HTTP error ${res.status}`);
+    }
+    return data;
 };
 
 /**
@@ -63,11 +128,9 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
     
     // For Gmail and strict SMTP relays, sender address must match authenticated user
     let fromAddress = process.env.EMAIL_FROM;
-    if (!fromAddress || fromAddress.includes('sendchat.app')) {
-        fromAddress = rawUser ? `"SendChat Security" <${rawUser}>` : '"SendChat Security" <security@sendchat.app>';
+    if (!fromAddress || fromAddress.includes('sendchat.app') || fromAddress.includes('"')) {
+        fromAddress = rawUser ? `"SendChat Security" <${rawUser}>` : `"SendChat Security" <security@sendchat.app>`;
     }
-
-    const transporter = createTransporter();
 
     const htmlContent = `
     <!DOCTYPE html>
@@ -122,7 +185,32 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
 
     let deliveryError = null;
 
-    // If SMTP transporter is configured, attempt sending real email
+    // 1. Try Resend HTTP API first (Works on Render Free Tier via HTTPS port 443)
+    if (process.env.RESEND_API_KEY) {
+        try {
+            const info = await sendViaResend({ email, name, otp, htmlContent });
+            console.log(`📧 Login OTP email dispatched via Resend HTTP API to ${email} (ID: ${info.id})`);
+            return { success: true, messageId: info.id, provider: 'resend' };
+        } catch (resendErr) {
+            console.error('⚠️ Resend HTTP API failed:', resendErr.message);
+            deliveryError = `Resend: ${resendErr.message}`;
+        }
+    }
+
+    // 2. Try Brevo HTTP API (Works on Render Free Tier via HTTPS port 443)
+    if (process.env.BREVO_API_KEY) {
+        try {
+            const info = await sendViaBrevo({ email, name, otp, htmlContent });
+            console.log(`📧 Login OTP email dispatched via Brevo HTTP API to ${email} (ID: ${info.messageId})`);
+            return { success: true, messageId: info.messageId, provider: 'brevo' };
+        } catch (brevoErr) {
+            console.error('⚠️ Brevo HTTP API failed:', brevoErr.message);
+            deliveryError = `Brevo: ${brevoErr.message}`;
+        }
+    }
+
+    // 3. Fallback to standard SMTP (Gmail / Custom SMTP)
+    const transporter = createTransporter();
     if (transporter) {
         try {
             const info = await transporter.sendMail({
@@ -133,7 +221,7 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
                 html: htmlContent,
             });
             console.log(`📧 Login OTP email dispatched successfully to ${email} (Message ID: ${info.messageId})`);
-            return { success: true, messageId: info.messageId };
+            return { success: true, messageId: info.messageId, provider: 'smtp' };
         } catch (err) {
             deliveryError = err.message;
             console.error('\n' + '═'.repeat(60));
@@ -141,32 +229,30 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
             console.error(`   To      : ${email}`);
             console.error(`   From    : ${fromAddress}`);
             console.error(`   Reason  : ${deliveryError}`);
-            if (deliveryError.includes('535') || deliveryError.includes('BadCredentials')) {
-                console.error('\n💡 [DIAGNOSIS: GOOGLE BAD CREDENTIALS]');
-                console.error('   Google rejected the username/app password combination.');
-                console.error('   Common causes:');
-                console.error('   1. 2-Step Verification is OFF on this Google account.');
-                console.error('   2. The App Password was generated for a different Google account.');
-                console.error('   3. Generate a fresh 16-letter App Password at: https://myaccount.google.com/apppasswords');
+
+            if (process.env.RENDER) {
+                console.error('\n🚨 [RENDER FREE TIER NOTICE]');
+                console.error('   Render.com blocks outgoing SMTP ports (25, 465, 587) on Free Tier.');
+                console.error('   To receive real emails in your inbox on Render Free Tier:');
+                console.error('   👉 Add RESEND_API_KEY (free from resend.com) in Render Environment variables.');
+                console.error('   OR check your Render Logs below to see the OTP code instantly.');
             }
             console.error('═'.repeat(60) + '\n');
         }
     }
 
-    // Terminal Fallback so the developer/user is NEVER blocked from logging in
+    // Console Fallback so user/developer is NEVER locked out of logging in
     console.log('\n' + '═'.repeat(60));
     console.log('🔐 [SENDCHAT SECURITY] LOGIN VERIFICATION CODE DISPATCH');
     console.log(`👤 Recipient : ${name || 'User'} <${email}>`);
     console.log(`🔢 OTP Code  : >>> ${otp} <<<`);
     console.log('⏱  Valid For : 5 Minutes (Single-Use)');
     if (deliveryError) {
-        console.log(`⚠️  Status    : SMTP Delivery Failed (${deliveryError.split('\n')[0]}). Used console fallback.`);
-    } else {
-        console.log('💡 Note      : To receive real emails, set SMTP_HOST & SMTP_USER in .env');
+        console.log(`⚠️  Status    : Delivery failed (${deliveryError.split('\n')[0]}). Used console fallback.`);
     }
     console.log('═'.repeat(60) + '\n');
 
-    return { success: true, devMode: true, deliveryError };
+    return { success: true, devMode: true, deliveryError, otp };
 };
 
 module.exports = {
