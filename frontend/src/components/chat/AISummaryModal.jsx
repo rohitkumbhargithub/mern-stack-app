@@ -64,7 +64,7 @@ export function AISummaryModal({
         <div className="flex items-center justify-between border-t border-border/60 pt-3 mt-1">
           <div className="text-[11px] text-muted-foreground flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rounded-full bg-green-500"></span>
-            Powered by Gemini AI
+            Smart AI Assistant
           </div>
 
           <div className="flex items-center gap-2">

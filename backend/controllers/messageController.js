@@ -7,7 +7,7 @@ const { decrypt } = require("../utils/crypto");
 
 exports.sendMessage = async (req, res) => {
     try {
-        const { message, replyTo, editId } = req.body;
+        const { message, replyTo, editId, isForwarded } = req.body;
         const { id: targetId } = req.params;
         const senderId = req.user._id;
         const userApiKey = req.headers["x-gemini-api-key"] || (req.user?.aiSettings?.geminiApiKey ? decrypt(req.user.aiSettings.geminiApiKey) : null);
@@ -51,7 +51,8 @@ exports.sendMessage = async (req, res) => {
             senderId,
             conversationId: conversation._id,
             message,
-            replyTo: replyTo || undefined
+            replyTo: replyTo || undefined,
+            isForwarded: Boolean(isForwarded)
         });
 
         if (newMessage) {
@@ -123,7 +124,47 @@ exports.getMessage = async (req, res, next) => {
             convId = fallbackConv._id;
         }
 
-        // Optimized query: utilizes compound index { conversationId: 1, createdAt: 1 } with .lean()
+        // Check pagination parameters
+        const isPaginated = req.query.paginated === "true" || Boolean(req.query.limit) || Boolean(req.query.before);
+        const limit = parseInt(req.query.limit) || 40;
+        const before = req.query.before;
+
+        const query = { conversationId: convId };
+        if (before) {
+            query.createdAt = { $lt: new Date(before) };
+        }
+
+        if (isPaginated) {
+            // Fetch newest `limit` messages (or newest before cursor), sorted descending then reversed
+            const messagesDesc = await Message.find(query)
+                .sort({ createdAt: -1 })
+                .limit(limit)
+                .populate({
+                    path: "replyTo",
+                    select: "message senderId createdAt"
+                })
+                .lean();
+
+            const messages = messagesDesc.reverse();
+
+            let hasMore = false;
+            if (messages.length > 0) {
+                const oldestDate = messages[0].createdAt;
+                const olderCount = await Message.countDocuments({
+                    conversationId: convId,
+                    createdAt: { $lt: oldestDate }
+                });
+                hasMore = olderCount > 0;
+            }
+
+            return res.status(200).json({
+                messages,
+                hasMore,
+                totalCount: messages.length
+            });
+        }
+
+        // Default query: utilizes compound index { conversationId: 1, createdAt: 1 } with .lean()
         const messages = await Message.find({ conversationId: convId })
             .sort({ createdAt: 1 })
             .populate({

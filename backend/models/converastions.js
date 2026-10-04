@@ -16,6 +16,10 @@ const converastionSchema = new mongoose.Schema({
     },
     chatName: String,
     groupAvatar: String,
+    groupAdmin: {
+        type: mongoose.Schema.ObjectId,
+        ref: "User"
+    },
 }, {
     timestamps: true
 });

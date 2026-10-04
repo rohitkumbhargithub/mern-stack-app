@@ -24,6 +24,9 @@ import AIComposerMenu from "./AIComposerMenu";
 import AISummaryModal from "./AISummaryModal";
 import { ChatSecurityModal } from "./ChatSecurityModal";
 import { UserAvatar } from "../common/UserAvatar";
+import { ProfileHoverCard } from "../common/ProfileHoverCard";
+import { ForwardMessageModal } from "./ForwardMessageModal";
+import { GroupDetailsModal } from "./GroupDetailsModal";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "✅"];
 
@@ -37,12 +40,14 @@ export function ConversationView({
   members = [],
   typingUsers = [],
   presence = new Set(),
-  isLoading = false,
   onDeleteMessage,
   onEditMessage,
   onReplyMessage,
   onForwardMessage,
-  onTypingChange
+  onTypingChange,
+  hasMoreMessages = false,
+  loadingOlderMessages = false,
+  onLoadOlderMessages
 }) {
   const typingTimeoutRef = useRef(null);
   const { selectedConverstion, setSelectedConverstion, isSidebarCollapsed, toggleSidebar } = useConverstion();
@@ -53,6 +58,9 @@ export function ConversationView({
   const fileInputRef = useRef(null);
   const scrollerRef = useRef(null);
   const textareaRef = useRef(null);
+  const prevScrollHeightRef = useRef(0);
+  const prevScrollTopRef = useRef(0);
+  const isPrependingRef = useRef(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
   const [highlightedId, setHighlightedId] = useState(null);
@@ -71,6 +79,9 @@ export function ConversationView({
   const [securityModalOpen, setSecurityModalOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [exitDialogOpen, setExitDialogOpen] = useState(false);
+  const [forwardModalOpen, setForwardModalOpen] = useState(false);
+  const [messageToForward, setMessageToForward] = useState(null);
+  const [groupDetailsModalOpen, setGroupDetailsModalOpen] = useState(false);
   const { deleteConversation, exitGroup, loading: actionLoading } = useDeleteConversation();
 
   const handleConfirmDelete = async () => {
@@ -83,6 +94,29 @@ export function ConversationView({
     setExitDialogOpen(false);
   };
 
+  // Reset replying, editing, and input state whenever conversationId changes
+  useEffect(() => {
+    setReplyingTo(null);
+    setEditingMessage(null);
+    setText("");
+    setSmartReplies([]);
+  }, [conversationId]);
+
+  // Allow Esc key to quickly cancel replying or editing
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        setReplyingTo(null);
+        if (editingMessage) {
+          setEditingMessage(null);
+          setText("");
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editingMessage]);
+
   const scrollToMessage = useCallback((msgId) => {
     const el = document.getElementById(`msg-${msgId}`);
     if (el) {
@@ -92,8 +126,33 @@ export function ConversationView({
     }
   }, []);
 
-  // High-performance auto scroll to bottom using requestAnimationFrame
+  // Preserve scroll position when older messages are prepended
   useEffect(() => {
+    const el = scrollerRef.current;
+    if (el && isPrependingRef.current) {
+      const scrollDiff = el.scrollHeight - prevScrollHeightRef.current;
+      el.scrollTop = scrollDiff + prevScrollTopRef.current;
+      isPrependingRef.current = false;
+    }
+  }, [messages]);
+
+  // Handle scroll event for auto-fetching older messages near top
+  const handleScroll = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    if (el.scrollTop < 60 && hasMoreMessages && !loadingOlderMessages && onLoadOlderMessages) {
+      prevScrollHeightRef.current = el.scrollHeight;
+      prevScrollTopRef.current = el.scrollTop;
+      isPrependingRef.current = true;
+      onLoadOlderMessages();
+    }
+  }, [hasMoreMessages, loadingOlderMessages, onLoadOlderMessages]);
+
+  // Auto scroll to bottom on new messages or conversation switch (unless prepending)
+  useEffect(() => {
+    if (isPrependingRef.current) return;
+
     let animId;
     const scroll = () => {
       const el = scrollerRef.current;
@@ -181,7 +240,11 @@ export function ConversationView({
 
     if (onSendMessage) {
       setSending(true);
-      await onSendMessage(body, { ...override, replyTo: replyingTo?._id, editId: editingMessage?._id });
+      await onSendMessage(body, { 
+        ...override, 
+        replyTo: replyingTo?._id || replyingTo?.id, 
+        editId: editingMessage?._id || editingMessage?.id 
+      });
       setSending(false);
       setText("");
       setReplyingTo(null);
@@ -284,9 +347,14 @@ export function ConversationView({
   const handleReplyItem = useCallback((msg) => {
     setReplyingTo(msg);
     setEditingMessage(null);
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
   }, []);
 
   const handleForwardItem = useCallback((msg) => {
+    setMessageToForward(msg);
+    setForwardModalOpen(true);
     if (onForwardMessage) onForwardMessage(msg);
   }, [onForwardMessage]);
 
@@ -323,37 +391,46 @@ export function ConversationView({
             {isSidebarCollapsed ? <PanelLeft className="h-4.5 w-4.5" /> : <PanelLeftClose className="h-4.5 w-4.5" />}
           </button>
 
-          <UserAvatar
-            src={otherMember?.profile || otherMember?.profilePic}
-            name={isGroup ? (selectedConverstion?.name || "Group") : (otherMember?.display_name || otherMember?.name || "User")}
-            size="md"
-            isAI={isAIConversation}
-            isGroup={isGroup}
-            groupAvatar={selectedConverstion?.groupAvatar}
-            online={Boolean(otherMember && presence.has(otherMember._id || otherMember.id))}
-            showOnlineDot={!isGroup}
-          />
-          <div>
-            <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-bold text-foreground leading-tight">
-                {isGroup ? (selectedConverstion?.name || "Group Chat") : (otherMember?.display_name || otherMember?.name || "Chat")}
-              </h3>
-              {isGroup && (
-                <span className="px-1.5 py-0.2 rounded-full bg-primary/10 text-primary text-[9px] font-bold tracking-wider border border-primary/20">
-                  GROUP
-                </span>
-              )}
-              {isAIConversation && (
-                <span className="px-1.5 py-0.2 rounded-full bg-primary/10 text-primary text-[9px] font-bold tracking-wider border border-primary/20">
-                  AI
-                </span>
-              )}
+          {/* Avatar and Chat Title */}
+          <div
+            onClick={() => isGroup && setGroupDetailsModalOpen(true)}
+            className={`flex items-center gap-3 transition-colors ${
+              isGroup ? "cursor-pointer p-1.5 -ml-1.5 rounded-lg hover:bg-muted/70 active:scale-98" : ""
+            }`}
+            title={isGroup ? "Click to view group details & members" : ""}
+          >
+            <UserAvatar
+              src={otherMember?.profile || otherMember?.profilePic}
+              name={isGroup ? (selectedConverstion?.name || "Group") : (otherMember?.display_name || otherMember?.name || "User")}
+              size="md"
+              isAI={isAIConversation}
+              isGroup={isGroup}
+              groupAvatar={selectedConverstion?.groupAvatar}
+              online={Boolean(otherMember && presence.has(otherMember._id || otherMember.id))}
+              showOnlineDot={!isGroup}
+            />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h3 className="text-sm font-bold text-foreground leading-tight">
+                  {isGroup ? (selectedConverstion?.name || "Group Chat") : (otherMember?.display_name || otherMember?.name || "Chat")}
+                </h3>
+                {isGroup && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-primary/10 text-primary text-[9px] font-bold tracking-wider border border-primary/20">
+                    GROUP
+                  </span>
+                )}
+                {isAIConversation && (
+                  <span className="px-1.5 py-0.2 rounded-full bg-primary/10 text-primary text-[9px] font-bold tracking-wider border border-primary/20">
+                    AI
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground font-medium">
+                {isAIConversation ? "Always active" : (
+                  isGroup ? `${members.length} members • Click for info` : (presence.has(otherMember?._id || otherMember?.id) ? "Online now" : "Offline")
+                )}
+              </p>
             </div>
-            <p className="text-[10px] text-muted-foreground font-medium">
-              {isAIConversation ? "Always active • Powered by Gemini" : (
-                isGroup ? `${members.length} members` : (presence.has(otherMember?._id || otherMember?.id) ? "Online now" : "Offline")
-              )}
-            </p>
           </div>
         </div>
 
@@ -393,6 +470,14 @@ export function ConversationView({
             <DropdownMenuContent align="end" className="w-48">
               {isGroup ? (
                 <>
+                  <DropdownMenuItem
+                    onClick={() => setGroupDetailsModalOpen(true)}
+                    className="cursor-pointer font-medium"
+                  >
+                    <Users className="h-4 w-4 mr-2 text-primary" />
+                    Group Info
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => setExitDialogOpen(true)}
                     className="text-amber-600 dark:text-amber-400 focus:text-amber-600 focus:bg-amber-500/10 cursor-pointer"
@@ -443,7 +528,47 @@ export function ConversationView({
       </div>
 
       {/* Messages Scroller */}
-      <div ref={scrollerRef} className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin">
+      <div 
+        ref={scrollerRef} 
+        onScroll={handleScroll}
+        className="flex-1 overflow-y-auto p-4 space-y-6 scrollbar-thin"
+      >
+        {/* WhatsApp-Style Load Older Messages Header */}
+        {hasMoreMessages && (
+          <div className="flex justify-center py-1">
+            {loadingOlderMessages ? (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/60 border border-border/50 text-xs text-muted-foreground shadow-2xs animate-pulse">
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                <span>Loading earlier messages…</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  const el = scrollerRef.current;
+                  if (el) {
+                    prevScrollHeightRef.current = el.scrollHeight;
+                    prevScrollTopRef.current = el.scrollTop;
+                    isPrependingRef.current = true;
+                  }
+                  onLoadOlderMessages && onLoadOlderMessages();
+                }}
+                className="text-xs font-semibold text-primary hover:underline px-3.5 py-1.5 rounded-full bg-primary/10 hover:bg-primary/15 border border-primary/20 transition-all cursor-pointer shadow-2xs"
+              >
+                ↑ Load earlier messages
+              </button>
+            )}
+          </div>
+        )}
+
+        {!hasMoreMessages && messages.length > 0 && (
+          <div className="text-center py-1">
+            <span className="text-[10px] text-muted-foreground/60 uppercase tracking-widest font-semibold">
+              Beginning of chat history
+            </span>
+          </div>
+        )}
+
         {/* End-to-End Encrypted Notice Banner */}
         <div className="flex justify-center my-1">
           <button
@@ -575,12 +700,19 @@ export function ConversationView({
 
       {/* Reply/Edit Bar */}
       {replyingTo && (
-        <div className="flex items-center justify-between gap-3 bg-muted/60 dark:bg-muted/30 px-4 py-2 border-t border-border animate-in slide-in-from-bottom-2 shrink-0">
+        <div className="flex items-center justify-between gap-3 bg-muted/80 dark:bg-muted/40 backdrop-blur-xs px-4 py-2 border-t border-border animate-in slide-in-from-bottom-2 shrink-0 z-10 shadow-xs">
           <div className="flex items-center gap-3 min-w-0 flex-1">
             <div className="w-1 bg-primary h-8 rounded-full shrink-0" />
             <div className="min-w-0 flex-1">
-              <div className="text-[10px] font-bold text-primary uppercase tracking-wider truncate">
-                Replying to {replyingTo.isAI ? "SendChat AI ✨" : (memberMap.get(replyingTo.senderId)?.name || "User")}
+              <div className="text-[10px] font-bold text-primary uppercase tracking-wider truncate flex items-center gap-1.5">
+                <Reply className="h-3 w-3" />
+                <span>
+                  Replying to {replyingTo.isAI 
+                    ? "SendChat AI ✨" 
+                    : (memberMap.get(String(replyingTo.senderId || replyingTo.sender_id || replyingTo.sender || ""))?.name 
+                       || memberMap.get(String(replyingTo.senderId || replyingTo.sender_id || replyingTo.sender || ""))?.display_name
+                       || (String(replyingTo.senderId || replyingTo.sender_id || replyingTo.sender || "") === me ? "You" : "User"))}
+                </span>
               </div>
               <div className="text-xs text-muted-foreground truncate block max-w-full">
                 {replyingTo.message || replyingTo.body}
@@ -589,9 +721,13 @@ export function ConversationView({
           </div>
           <button
             type="button"
-            onClick={() => setReplyingTo(null)}
-            className="shrink-0 h-7 w-7 rounded-full flex items-center justify-center hover:bg-background/80 text-muted-foreground hover:text-foreground transition-all cursor-pointer border border-border/50 hover:border-border shadow-xs"
-            title="Cancel reply"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setReplyingTo(null);
+            }}
+            className="shrink-0 h-7 w-7 rounded-full flex items-center justify-center hover:bg-background text-muted-foreground hover:text-foreground transition-all cursor-pointer border border-border/50 hover:border-border shadow-xs active:scale-95"
+            title="Cancel reply (Esc)"
             aria-label="Cancel reply"
           >
             <X className="h-4 w-4" />
@@ -745,6 +881,20 @@ export function ConversationView({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Forward Message Modal */}
+      <ForwardMessageModal
+        open={forwardModalOpen}
+        onOpenChange={setForwardModalOpen}
+        messageToForward={messageToForward}
+      />
+
+      {/* Group Details & Member Management Modal */}
+      <GroupDetailsModal
+        open={groupDetailsModalOpen}
+        onOpenChange={setGroupDetailsModalOpen}
+        conversation={selectedConverstion}
+      />
     </div>
   );
 }
@@ -761,17 +911,26 @@ const MessageItem = memo(function MessageItem({
   const msgId = msg.id || msg._id;
 
   return (
-    <div id={`msg-${msgId}`} className={"group mb-1 flex gap-3 transition-all duration-500 " + (mine ? "justify-end " : "justify-start ") + (isHighlighted ? "bg-primary/10 ring-2 ring-primary/20 rounded-lg scale-[1.02] py-2 px-1" : "")}>
+    <div id={`msg-${msgId}`} className={"group mb-2.5 sm:mb-3 pt-1 flex gap-3 transition-all duration-300 relative " + (mine ? "justify-end " : "justify-start ") + (isHighlighted ? "bg-primary/10 ring-2 ring-primary/20 rounded-lg scale-[1.02] py-2 px-1" : "")}>
       {!mine && (
         <div className="w-7 shrink-0">
           {showHeader && (
-            <UserAvatar
-              src={sender?.avatar_url || sender?.profilePic || sender?.profile}
-              name={sender?.display_name || sender?.name || sender?.username || "User"}
-              size="sm"
+            <ProfileHoverCard
+              user={sender}
               isAI={isAI}
-              className="mt-1"
-            />
+              side="right"
+              align="start"
+            >
+              <div className="cursor-pointer">
+                <UserAvatar
+                  src={sender?.avatar_url || sender?.profilePic || sender?.profile}
+                  name={sender?.display_name || sender?.name || sender?.username || "User"}
+                  size="sm"
+                  isAI={isAI}
+                  className="mt-1"
+                />
+              </div>
+            </ProfileHoverCard>
           )}
         </div>
       )}
@@ -793,6 +952,14 @@ const MessageItem = memo(function MessageItem({
               </div>
             ) : (
               <>
+                {/* Forwarded Badge */}
+                {msg.isForwarded && (
+                  <div className={"flex items-center gap-1 mb-1 text-[10px] font-medium italic opacity-75 " + (mine ? "text-bubble-mine-foreground" : "text-bubble-theirs-foreground")}>
+                    <Forward className="h-3 w-3" />
+                    <span>Forwarded</span>
+                  </div>
+                )}
+
                 {msg.replyTo && (
                   <div 
                     onClick={() => onReplyClick && onReplyClick(msg.replyTo._id || msg.replyTo.id)}
@@ -848,7 +1015,7 @@ const MessageItem = memo(function MessageItem({
           </div>
 
           {/* Hover Menu */}
-          <div className={"absolute -top-3 hidden items-center gap-0.5 rounded-full border border-border bg-card px-1 py-0.5 shadow-md group-hover:flex z-10 " + (mine ? "right-0" : "left-0")}>
+          <div className={"absolute -top-7 sm:-top-8 hidden items-center gap-0.5 rounded-full border border-border/80 bg-card/95 backdrop-blur-xs px-1.5 py-0.5 shadow-md group-hover:flex z-20 transition-all " + (mine ? "right-0" : "left-0")}>
             {!msg.isDeleted && (
               <div className="flex items-center border-r border-border pr-0.5 mr-0.5">
                 {EMOJIS.slice(0, 4).map((e) => (
