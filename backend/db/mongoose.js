@@ -11,8 +11,19 @@ const connectToDb = async () => {
     const isProduction = process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER);
 
     // In production / Render, always default to Atlas cloud DB rather than localhost
-    const primaryUri = configuredUri || (isProduction ? process.env.REMOTE_MONGO : process.env.LOCAL_MONGO);
-    const isPrimaryLocal = primaryUri.includes('127.0.0.1') || primaryUri.includes('localhost');
+    let primaryUri = configuredUri || (isProduction ? process.env.REMOTE_MONGO : process.env.LOCAL_MONGO);
+    
+    // Ensure Atlas SRV connection string has authSource=admin and retryWrites for maximum stability
+    if (primaryUri && primaryUri.startsWith("mongodb+srv://")) {
+        if (!primaryUri.includes("retryWrites=")) {
+            primaryUri += (primaryUri.includes("?") ? "&" : "?") + "retryWrites=true&w=majority";
+        }
+        if (!primaryUri.includes("authSource=")) {
+            primaryUri += (primaryUri.includes("?") ? "&" : "?") + "authSource=admin";
+        }
+    }
+
+    const isPrimaryLocal = primaryUri && (primaryUri.includes('127.0.0.1') || primaryUri.includes('localhost'));
     const fallbackUri = isPrimaryLocal ? process.env.REMOTE_MONGO : (isProduction ? null : process.env.LOCAL_MONGO);
 
     const mask = (uri) => uri ? uri.replace(/\/\/.*@/, '//***@') : "";
@@ -20,7 +31,7 @@ const connectToDb = async () => {
     const connectOpts = {
         maxPoolSize: 20,
         minPoolSize: 5,
-        serverSelectionTimeoutMS: 8000,
+        serverSelectionTimeoutMS: 10000,
         socketTimeoutMS: 45000,
         family: 4, // Force IPv4 resolution to prevent TLS handshake failures on Atlas
     };
