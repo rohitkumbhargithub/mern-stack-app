@@ -1,28 +1,38 @@
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { useSocketContext } from '../context/SocketContext';
+import { useAuthContext } from '../context/AuthContext';
 import useConverstion from '../zustand/useConverstion';
 import notification from '../assets/sounds/notification.mp3';
 
 const useListenMessages = () => {
   const { socket } = useSocketContext();
+  const { authUser } = useAuthContext();
   const { 
     setMessages, 
     removeConversation, 
     addConversation, 
     updateConversation, 
-    selectedConverstion 
+    selectedConverstion,
+    setSelectedConverstion
   } = useConverstion();
 
   useEffect(() => {
     if (!socket) return;
 
     const handleNewMessage = (newMessage) => {
-        newMessage.shouldShake = true;
-        try {
-            const sound = new Audio(notification);
-            sound.play().catch(() => {}); // Gracefully ignore browser autoplay policy restrictions
-        } catch (_) {}
+        const myId = String(authUser?._id || authUser?.id || "");
+        const senderId = String(newMessage.senderId || newMessage.sender_id || "");
+        const isFromMe = Boolean(myId && senderId && senderId === myId);
+
+        // Only play notification audio and shake if message is received from someone else
+        if (!isFromMe) {
+            newMessage.shouldShake = true;
+            try {
+                const sound = new Audio(notification);
+                sound.play().catch(() => {}); // Gracefully ignore browser autoplay policy restrictions
+            } catch (_) {}
+        }
 
         setMessages((prev) => {
             const newId = newMessage._id || newMessage.id;
@@ -76,6 +86,17 @@ const useListenMessages = () => {
         }
     };
 
+    const handleGroupMembersUpdated = ({ conversationId, participated, membersCount }) => {
+        updateConversation(conversationId, { participated, membersCount });
+        if (selectedConverstion && String(selectedConverstion._id) === String(conversationId)) {
+            setSelectedConverstion({
+                ...selectedConverstion,
+                participated,
+                membersCount
+            });
+        }
+    };
+
     const handleNewConversation = (groupPayload) => {
         addConversation(groupPayload);
     };
@@ -86,6 +107,7 @@ const useListenMessages = () => {
     socket.on("conversationDeleted", handleConversationDeleted);
     socket.on("conversationCleared", handleConversationCleared);
     socket.on("userLeftGroup", handleUserLeftGroup);
+    socket.on("groupMembersUpdated", handleGroupMembersUpdated);
     socket.on("newConversation", handleNewConversation);
 
     return () => {
@@ -95,9 +117,10 @@ const useListenMessages = () => {
         socket.off("conversationDeleted", handleConversationDeleted);
         socket.off("conversationCleared", handleConversationCleared);
         socket.off("userLeftGroup", handleUserLeftGroup);
+        socket.off("groupMembersUpdated", handleGroupMembersUpdated);
         socket.off("newConversation", handleNewConversation);
     };
-  }, [socket, setMessages, removeConversation, addConversation, updateConversation, selectedConverstion]);
+  }, [socket, setMessages, removeConversation, addConversation, updateConversation, selectedConverstion, setSelectedConverstion, authUser]);
 };
 
 export default useListenMessages;

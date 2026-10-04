@@ -27,6 +27,10 @@ const messageSchema = new mongoose.Schema({
         type: mongoose.Schema.ObjectId,
         ref: "Message"
     },
+    isForwarded: {
+        type: Boolean,
+        default: false
+    },
     isEdited: {
         type: Boolean,
         default: false

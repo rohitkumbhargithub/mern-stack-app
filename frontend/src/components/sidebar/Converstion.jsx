@@ -3,6 +3,7 @@ import { MoreVertical, Trash2, LogOut, Loader2 } from 'lucide-react';
 import useConverstion from '../../zustand/useConverstion';
 import { useSocketContext } from '../../context/SocketContext';
 import { UserAvatar } from '../common/UserAvatar';
+import { ProfileHoverCard } from '../common/ProfileHoverCard';
 import useDeleteConversation from '../../hooks/useDeleteConversation';
 import {
     DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator
@@ -49,16 +50,27 @@ const Converstion = ({ converstion }) => {
                         : "hover:bg-accent text-muted-foreground hover:text-foreground")
                 }
             >
-                <UserAvatar
-                    src={converstion.profile || converstion.profilePic}
-                    name={name}
-                    size="md"
+                <ProfileHoverCard
+                    user={converstion}
+                    isOnline={isOnline}
                     isAI={isAI}
                     isGroup={isGroup}
-                    groupAvatar={converstion.groupAvatar}
-                    online={isOnline}
-                    showOnlineDot={!isGroup}
-                />
+                    side="right"
+                    align="center"
+                >
+                    <div className="shrink-0">
+                        <UserAvatar
+                            src={converstion.profile || converstion.profilePic}
+                            name={name}
+                            size="md"
+                            isAI={isAI}
+                            isGroup={isGroup}
+                            groupAvatar={converstion.groupAvatar}
+                            online={isOnline}
+                            showOnlineDot={!isGroup}
+                        />
+                    </div>
+                </ProfileHoverCard>
 
                 <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">

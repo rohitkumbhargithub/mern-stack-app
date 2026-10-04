@@ -38,6 +38,7 @@ exports.getUsersSildeBar = async (req, res, next) => {
             ]
         })
         .populate("participated", "-password -aiSettings")
+        .populate("groupAdmin", "-password -aiSettings")
         .populate({
             path: "messages",
             options: { sort: { createdAt: -1 }, limit: 1 }
@@ -53,6 +54,7 @@ exports.getUsersSildeBar = async (req, res, next) => {
                     name: conv.chatName || "Group Chat",
                     profile: conv.groupAvatar || "",
                     groupAvatar: conv.groupAvatar || "",
+                    groupAdmin: conv.groupAdmin || (conv.participated && conv.participated[0]),
                     isGroupChat: true,
                     type: "group",
                     participated: conv.participated,
@@ -220,17 +222,20 @@ exports.createGroupConversation = async (req, res) => {
             isGroupChat: true,
             chatName: name.trim(),
             groupAvatar: groupAvatar || "",
+            groupAdmin: loggedInUserId,
             messages: []
         });
 
         const populatedGroup = await Converastion.findById(newGroup._id)
-            .populate("participated", "-password -aiSettings");
+            .populate("participated", "-password -aiSettings")
+            .populate("groupAdmin", "-password -aiSettings");
 
         const groupPayload = {
             _id: populatedGroup._id,
             name: populatedGroup.chatName,
             profile: populatedGroup.groupAvatar || "",
             groupAvatar: populatedGroup.groupAvatar || "",
+            groupAdmin: populatedGroup.groupAdmin || populatedGroup.participated[0],
             isGroupChat: true,
             type: "group",
             participated: populatedGroup.participated,
@@ -410,6 +415,156 @@ exports.exitGroup = async (req, res) => {
         });
     } catch (err) {
         console.error("exitGroup error:", err);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+exports.getGroupDetails = async (req, res) => {
+    try {
+        const { id: groupId } = req.params;
+        const loggedInUserId = req.user._id;
+
+        const group = await Converastion.findById(groupId)
+            .populate("participated", "-password -aiSettings")
+            .populate("groupAdmin", "-password -aiSettings");
+
+        if (!group || !group.isGroupChat) {
+            return res.status(404).json({ error: "Group not found" });
+        }
+
+        // Verify membership
+        const isMember = group.participated.some(
+            p => p && p._id.toString() === loggedInUserId.toString()
+        );
+        if (!isMember) {
+            return res.status(403).json({ error: "You are not a member of this group" });
+        }
+
+        const adminUser = group.groupAdmin || group.participated[0];
+
+        return res.status(200).json({
+            _id: group._id,
+            name: group.chatName,
+            groupAvatar: group.groupAvatar,
+            groupAdmin: adminUser,
+            participated: group.participated,
+            membersCount: group.participated.length,
+            createdAt: group.createdAt,
+            updatedAt: group.updatedAt
+        });
+    } catch (err) {
+        console.error("getGroupDetails error:", err);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+exports.addGroupMembers = async (req, res) => {
+    try {
+        const { id: groupId } = req.params;
+        const { memberIds } = req.body;
+        const loggedInUserId = req.user._id;
+
+        if (!Array.isArray(memberIds) || memberIds.length === 0) {
+            return res.status(400).json({ error: "Please select at least one member to add" });
+        }
+
+        const group = await Converastion.findById(groupId);
+        if (!group || !group.isGroupChat) {
+            return res.status(404).json({ error: "Group not found" });
+        }
+
+        // Verify that requester is in the group
+        const isMember = group.participated.some(
+            p => p.toString() === loggedInUserId.toString()
+        );
+        if (!isMember) {
+            return res.status(403).json({ error: "You are not a member of this group" });
+        }
+
+        // Filter out members already in the group
+        const existingMemberIdStrings = new Set(group.participated.map(p => p.toString()));
+        const newMemberIds = memberIds
+            .map(m => (typeof m === 'object' ? (m._id || m.id) : m))
+            .filter(id => id && !existingMemberIdStrings.has(id.toString()));
+
+        if (newMemberIds.length === 0) {
+            return res.status(400).json({ error: "Selected user(s) are already in this group" });
+        }
+
+        // Fetch users being added to verify and get their names
+        const usersToAdd = await User.find({ _id: { $in: newMemberIds } }).select("name username profile email");
+        if (usersToAdd.length === 0) {
+            return res.status(404).json({ error: "Users not found" });
+        }
+
+        usersToAdd.forEach(u => {
+            group.participated.push(u._id);
+        });
+
+        const Message = require("../models/messages");
+        const { getReceiverSocketIds, io } = require("../socket/socket");
+
+        // Create a system message in the chat
+        const addedNames = usersToAdd.map(u => u.name || u.username).join(", ");
+        const systemMessage = new Message({
+            senderId: loggedInUserId,
+            conversationId: group._id,
+            message: `${req.user.name || "A member"} added ${addedNames} to the group.`
+        });
+        await systemMessage.save();
+        group.messages.push(systemMessage._id);
+
+        await group.save();
+
+        const populatedGroup = await Converastion.findById(groupId)
+            .populate("participated", "-password -aiSettings")
+            .populate("groupAdmin", "-password -aiSettings");
+
+        const groupPayload = {
+            _id: populatedGroup._id,
+            name: populatedGroup.chatName,
+            profile: populatedGroup.groupAvatar || "",
+            groupAvatar: populatedGroup.groupAvatar || "",
+            groupAdmin: populatedGroup.groupAdmin || populatedGroup.participated[0],
+            isGroupChat: true,
+            type: "group",
+            participated: populatedGroup.participated,
+            membersCount: populatedGroup.participated.length,
+            lastMessage: systemMessage.message,
+            lastMessageTime: systemMessage.createdAt
+        };
+
+        // Notify existing and new members via sockets
+        populatedGroup.participated.forEach(p => {
+            const pId = p._id.toString();
+            const socketIds = getReceiverSocketIds(pId);
+            socketIds.forEach(sId => {
+                if (newMemberIds.some(nId => nId.toString() === pId)) {
+                    io.to(sId).emit("newConversation", groupPayload);
+                }
+                io.to(sId).emit("groupMembersUpdated", {
+                    conversationId: groupId,
+                    participated: populatedGroup.participated,
+                    membersCount: populatedGroup.participated.length
+                });
+                io.to(sId).emit("newMessage", systemMessage);
+            });
+        });
+
+        io.to(groupId.toString()).emit("groupMembersUpdated", {
+            conversationId: groupId,
+            participated: populatedGroup.participated,
+            membersCount: populatedGroup.participated.length
+        });
+        io.to(groupId.toString()).emit("newMessage", systemMessage);
+
+        return res.status(200).json({
+            message: "Members added successfully",
+            group: groupPayload
+        });
+
+    } catch (err) {
+        console.error("addGroupMembers error:", err);
         return res.status(500).json({ error: "Internal server error" });
     }
 };

@@ -14,7 +14,13 @@ const MessageContainer = () => {
     const { selectedConverstion, setSelectedConverstion } = useConverstion();
     const { authUser } = useAuthContext();
     const { socket, onlineUsers } = useSocketContext();
-    const { messages, loading: messagesLoading } = userGetMessages();
+    const { 
+        messages, 
+        loading: messagesLoading, 
+        loadingOlder: loadingOlderMessages, 
+        hasMore: hasMoreMessages, 
+        loadOlderMessages 
+    } = userGetMessages();
     useListenMessages();
     const { sendMessage } = userSendMessage();
     const { deleteMessage } = useDeleteMessage();
@@ -86,6 +92,7 @@ const MessageContainer = () => {
     return (
         <div className="flex h-full min-h-0 flex-col">
             <ConversationView
+                key={selectedConverstion._id}
                 conversationId={selectedConverstion._id}
                 conversationName={selectedConverstion.name}
                 messages={messages}
@@ -97,6 +104,9 @@ const MessageContainer = () => {
                 typingUsers={typingUsers}
                 onTypingChange={handleTypingChange}
                 isLoading={messagesLoading}
+                hasMoreMessages={hasMoreMessages}
+                loadingOlderMessages={loadingOlderMessages}
+                onLoadOlderMessages={loadOlderMessages}
             />
         </div>
     );

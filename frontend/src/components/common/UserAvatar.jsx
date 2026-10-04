@@ -84,7 +84,6 @@ export function UserAvatar({
       <div className="relative shrink-0 inline-block">
         <div
           className={`${sizeClasses} rounded-full bg-gradient-to-tr from-primary via-purple-500 to-indigo-500 text-white grid place-items-center shadow-xs font-bold border border-primary/30 ${className}`}
-          title="SendChat AI"
         >
           <Sparkles className="h-1/2 w-1/2 animate-pulse" />
         </div>
@@ -143,7 +142,6 @@ export function UserAvatar({
       ) : (
         <div
           className={`${sizeClasses} rounded-full bg-gradient-to-tr ${gradient} text-white font-bold flex items-center justify-center shadow-2xs tracking-wider select-none border border-white/10 ${className}`}
-          title={name}
         >
           {initials}
         </div>
