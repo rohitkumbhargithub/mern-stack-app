@@ -32,6 +32,7 @@ const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "✅"]
 
 export function ConversationView({
   conversationId,
+  conversationName,
   messages = [],
   onSendMessage,
   onFileUpload,
@@ -45,6 +46,7 @@ export function ConversationView({
   onReplyMessage,
   onForwardMessage,
   onTypingChange,
+  isLoading = false,
   hasMoreMessages = false,
   loadingOlderMessages = false,
   onLoadOlderMessages
@@ -580,7 +582,12 @@ export function ConversationView({
             <span>Messages are end-to-end encrypted. Tap to verify.</span>
           </button>
         </div>
-        {messages.length === 0 && !isLoading ? (
+        {isLoading ? (
+          <div className="flex h-full min-h-[220px] flex-col items-center justify-center p-8 space-y-3 text-muted-foreground/60">
+            <Loader2 className="h-7 w-7 animate-spin text-primary" />
+            <p className="text-xs font-medium animate-pulse">Loading messages...</p>
+          </div>
+        ) : messages.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center text-center opacity-60 max-w-sm mx-auto">
             {isAIConversation ? (
               <div className="flex flex-col items-center space-y-3 p-6 rounded-2xl bg-card border border-border shadow-xs">
