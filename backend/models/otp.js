@@ -6,11 +6,21 @@ const otpSchema = new mongoose.Schema({
         required: true,
         lowercase: true,
         trim: true,
-        index: true,
+        unique: true,
     },
     otp: {
         type: String,
         required: true,
+    },
+    purpose: {
+        type: String,
+        enum: ['signup'],
+        default: 'signup',
+    },
+    payload: {
+        name: { type: String },
+        password: { type: String }, // bcrypt hash
+        gender: { type: String, enum: ['male', 'female'] }
     },
     attempts: {
         type: Number,

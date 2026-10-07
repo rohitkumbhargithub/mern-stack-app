@@ -3,9 +3,9 @@ const router = express.Router();
 const authController = require('../controllers/authControllers');
 
 router.post('/login', authController.login);
-router.post('/verify-otp', authController.verifyOtp);
-router.post('/resend-otp', authController.resendOtp);
-router.post('/signup', authController.singup);
+router.post('/signup', authController.signup || authController.requestSignupOtp || authController.singup);
+router.post('/signup/verify', authController.verifySignupOtp || authController.verifyOtp);
+router.post('/signup/resend', authController.resendSignupOtp || authController.resendOtp);
 router.post('/logout', authController.logout);
 
 module.exports = router;

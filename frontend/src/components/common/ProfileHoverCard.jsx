@@ -2,6 +2,8 @@ import React from 'react';
 import { HoverCard, HoverCardTrigger, HoverCardContent } from '@/components/ui/hover-card';
 import { UserAvatar } from './UserAvatar';
 import { Sparkles, Users, Mail, Circle, MessageSquare } from 'lucide-react';
+import useConverstion from '../../zustand/useConverstion';
+import { useSocketContext } from '@/context/SocketContext';
 
 export function ProfileHoverCard({
   user,
@@ -10,9 +12,17 @@ export function ProfileHoverCard({
   isGroup = false,
   align = "start",
   side = "right",
+  onChatClick,
   children
 }) {
   if (!user && !isAI) return children;
+
+  const { conversations = [], setSelectedConverstion } = useConverstion();
+  const socketCtx = useSocketContext();
+  const onlineUsers = socketCtx?.onlineUsers || [];
+
+  const targetUserId = String(user?._id || user?.id || user?.userId || "");
+  const effectiveOnline = isAI || isOnline || (Boolean(targetUserId) && Array.isArray(onlineUsers) && onlineUsers.includes(targetUserId));
 
   const displayName = isAI 
     ? "SendChat AI" 
@@ -21,6 +31,39 @@ export function ProfileHoverCard({
   const avatarSrc = user?.avatar_url || user?.profilePic || user?.profile;
   const username = user?.username ? `@${user.username}` : (user?.email || "");
   const membersCount = user?.membersCount || (user?.participated ? user.participated.length : 0);
+
+  const handleChatClick = (e) => {
+    e.stopPropagation();
+    if (onChatClick) {
+      onChatClick();
+      return;
+    }
+    if (user && !isGroup && !isAI) {
+      if (!targetUserId) return;
+
+      // Find if an existing 1-on-1 conversation with this user is in the list
+      const existingConv = conversations.find(
+        (c) => !c.isGroupChat && (
+          String(c.userId || c._id) === targetUserId ||
+          (Array.isArray(c.participated) && c.participated.some((p) => String(p._id || p.id || p) === targetUserId))
+        )
+      );
+
+      if (existingConv) {
+        setSelectedConverstion(existingConv);
+      } else {
+        setSelectedConverstion({
+          _id: targetUserId,
+          userId: targetUserId,
+          name: displayName,
+          profile: avatarSrc,
+          isGroupChat: false,
+          type: "user",
+          ...user,
+        });
+      }
+    }
+  };
 
   return (
     <HoverCard openDelay={250} closeDelay={150}>
@@ -41,7 +84,7 @@ export function ProfileHoverCard({
               isAI={isAI}
               isGroup={isGroup}
               groupAvatar={user?.groupAvatar}
-              online={isOnline}
+              online={effectiveOnline}
               showOnlineDot={!isGroup}
             />
           </div>
@@ -82,13 +125,13 @@ export function ProfileHoverCard({
               {isAI ? (
                 <span className="flex items-center gap-1 text-primary">
                   <Circle className="h-2 w-2 fill-primary animate-pulse" />
-                  Always active & ready to assist
+                  Always active &amp; ready to assist
                 </span>
               ) : isGroup ? (
                 <span className="text-muted-foreground">
                   Shared discussion channel
                 </span>
-              ) : isOnline ? (
+              ) : effectiveOnline ? (
                 <span className="flex items-center gap-1 text-emerald-500 font-semibold">
                   <Circle className="h-2 w-2 fill-emerald-500" />
                   Online now
@@ -117,10 +160,15 @@ export function ProfileHoverCard({
           ) : (
             <span>SendChat Contact</span>
           )}
-          <span className="inline-flex items-center gap-0.5 text-primary text-[10px] font-medium shrink-0">
-            <MessageSquare className="h-2.5 w-2.5" />
-            Chat
-          </span>
+          {!isGroup && !isAI && (
+            <button
+              onClick={handleChatClick}
+              className="inline-flex items-center gap-0.5 text-primary text-[10px] font-semibold shrink-0 hover:underline cursor-pointer px-1.5 py-0.5 rounded hover:bg-primary/10 transition-colors"
+            >
+              <MessageSquare className="h-2.5 w-2.5" />
+              Chat
+            </button>
+          )}
         </div>
       </HoverCardContent>
     </HoverCard>

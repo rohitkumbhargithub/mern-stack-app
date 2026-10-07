@@ -1,5 +1,27 @@
 const mongoose = require('mongoose');
 
+const pollOptionSchema = new mongoose.Schema({
+    id: { type: String, required: true },
+    text: { type: String, required: true },
+    votes: [{ type: mongoose.Schema.ObjectId, ref: "User" }]
+}, { _id: false });
+
+const reactionSchema = new mongoose.Schema({
+    user: {
+        type: mongoose.Schema.ObjectId,
+        ref: "User",
+        required: true
+    },
+    userName: {
+        type: String,
+        default: "User"
+    },
+    emoji: {
+        type: String,
+        required: true
+    }
+}, { _id: false });
+
 const messageSchema = new mongoose.Schema({
     senderId: {
         type: mongoose.Schema.ObjectId,
@@ -34,6 +56,12 @@ const messageSchema = new mongoose.Schema({
     isEdited: {
         type: Boolean,
         default: false
+    },
+    reactions: [reactionSchema],
+    poll: {
+        question: { type: String },
+        options: [pollOptionSchema],
+        allowMultiple: { type: Boolean, default: false }
     }
 }, {
     timestamps: true

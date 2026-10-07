@@ -2,9 +2,38 @@ import { create } from 'zustand';
 
 const useConverstion = create((set) => ({
     selectedConverstion: null,
-    setSelectedConverstion: (selectedConverstion) => set({ selectedConverstion }),
+    setSelectedConverstion: (selectedConverstion) => set((state) => {
+        const convId = selectedConverstion ? String(selectedConverstion._id) : null;
+        let nextUnread = state.unreadCounts;
+        if (convId && state.unreadCounts[convId]) {
+            nextUnread = { ...state.unreadCounts };
+            delete nextUnread[convId];
+        }
+        return { selectedConverstion, unreadCounts: nextUnread };
+    }),
     messages: [],
     conversations: [],
+    unreadCounts: {},
+    incrementUnread: (conversationId) => set((state) => {
+        const id = String(conversationId);
+        // Never increment unread count for the currently active chat
+        if (state.selectedConverstion && String(state.selectedConverstion._id) === id) {
+            return state;
+        }
+        return {
+            unreadCounts: {
+                ...state.unreadCounts,
+                [id]: (state.unreadCounts[id] || 0) + 1
+            }
+        };
+    }),
+    clearUnread: (conversationId) => set((state) => {
+        const id = String(conversationId);
+        if (!state.unreadCounts[id]) return state;
+        const next = { ...state.unreadCounts };
+        delete next[id];
+        return { unreadCounts: next };
+    }),
     isSidebarCollapsed: false,
     setIsSidebarCollapsed: (isSidebarCollapsed) => set({ isSidebarCollapsed }),
     toggleSidebar: () => set((state) => ({ isSidebarCollapsed: !state.isSidebarCollapsed })),

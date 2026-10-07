@@ -1,11 +1,16 @@
 import React, { useState, useCallback } from 'react'
 import Converstions from './Converstions'
-import { MessageCircle, Plus, Settings, LogOut, Search, PanelLeftClose } from 'lucide-react';
+import { MessageCircle, Plus, Settings, LogOut, Search, PanelLeftClose, MoreVertical } from 'lucide-react';
 import { NewChatDialog } from '../chat/NewChatDialog';
 import { SettingsDialog } from '../chat/SettingsDialog';
 import userLogout from '../../hooks/userLogout';
 import { useNavigate } from 'react-router-dom';
 import useConverstion from '../../zustand/useConverstion';
+import { useAuthContext } from '../../context/AuthContext';
+import { UserAvatar } from '../common/UserAvatar';
+import {
+    DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator
+} from '@/components/ui/dropdown-menu';
 
 import api from '../../lib/api';
 import { toast } from 'sonner';
@@ -17,6 +22,7 @@ const SideBar = () => {
     const [searchResults, setSearchResults] = useState([]);
     const [searchLoading, setSearchLoading] = useState(false);
     const { logout } = userLogout();
+    const { authUser } = useAuthContext();
     const navigate = useNavigate();
     const { setSelectedConverstion, toggleSidebar } = useConverstion();
 
@@ -68,20 +74,6 @@ const SideBar = () => {
                     >
                         <Plus className="h-4 w-4" />
                     </button>
-                    <button 
-                        onClick={() => setSettingsOpen(true)}
-                        className="rounded-md p-1.5 hover:bg-accent text-muted-foreground transition-colors" 
-                        title="Settings"
-                    >
-                        <Settings className="h-4 w-4" />
-                    </button>
-                    <button
-                        onClick={handleLogout}
-                        title="Sign out"
-                        className="rounded-md p-1.5 hover:bg-accent text-muted-foreground transition-colors"
-                    >
-                        <LogOut className="h-4 w-4" />
-                    </button>
                 </div>
             </div>
 
@@ -103,6 +95,59 @@ const SideBar = () => {
                     searchFilter={search}
                     onStartNewChat={handleOpenNewChat}
                 />
+            </div>
+
+            {/* User Profile & Sign Out Footer */}
+            <div className="border-t border-border p-2.5 bg-card/70 flex items-center justify-between gap-2 shrink-0">
+                <button
+                    onClick={() => setSettingsOpen(true)}
+                    className="flex items-center gap-2.5 min-w-0 flex-1 p-1 rounded-lg hover:bg-accent transition-colors text-left group cursor-pointer"
+                    title="Account Settings"
+                >
+                    <UserAvatar
+                        src={authUser?.profile}
+                        name={authUser?.name || "User"}
+                        size="sm"
+                        online={true}
+                        showOnlineDot={true}
+                    />
+                    <div className="min-w-0 flex-1">
+                        <p className="text-xs font-semibold text-foreground truncate group-hover:text-primary transition-colors">
+                            {authUser?.name || "You"}
+                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                            {authUser?.email || "Account Settings"}
+                        </p>
+                    </div>
+                </button>
+                <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                        <button
+                            type="button"
+                            className="p-2 rounded-lg hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0 cursor-pointer"
+                            title="Account Options"
+                        >
+                            <MoreVertical className="h-4 w-4" />
+                        </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" side="top" className="w-44 mb-1">
+                        <DropdownMenuItem
+                            onClick={() => setSettingsOpen(true)}
+                            className="cursor-pointer flex items-center gap-2"
+                        >
+                            <Settings className="h-4 w-4" />
+                            <span>Settings</span>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                            onClick={handleLogout}
+                            className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer flex items-center gap-2"
+                        >
+                            <LogOut className="h-4 w-4" />
+                            <span>Sign out</span>
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
             </div>
 
             <NewChatDialog

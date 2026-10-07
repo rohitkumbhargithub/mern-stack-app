@@ -4,7 +4,7 @@ import {
   Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, 
   FileText, Image as ImageIcon, Loader2, MessageCircle, Trash2, Pencil, 
   Reply, Forward, MoreVertical, ArrowLeft, Sparkles, Globe, HelpCircle, Bot,
-  ShieldCheck, Lock, PanelLeft, PanelLeftClose, LogOut
+  ShieldCheck, Lock, PanelLeft, PanelLeftClose, LogOut, BarChart2
 } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 
 import useConverstion from "../../zustand/useConverstion";
+import { useSocketContext } from "../../context/SocketContext";
 import useAI from "../../hooks/useAI";
 import useDeleteConversation from "../../hooks/useDeleteConversation";
 import AIQuickReplies from "./AIQuickReplies";
@@ -27,6 +28,8 @@ import { UserAvatar } from "../common/UserAvatar";
 import { ProfileHoverCard } from "../common/ProfileHoverCard";
 import { ForwardMessageModal } from "./ForwardMessageModal";
 import { GroupDetailsModal } from "./GroupDetailsModal";
+import { CreatePollModal } from "./CreatePollModal";
+import { PollCard } from "./PollCard";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "✅"];
 
@@ -84,7 +87,13 @@ export function ConversationView({
   const [forwardModalOpen, setForwardModalOpen] = useState(false);
   const [messageToForward, setMessageToForward] = useState(null);
   const [groupDetailsModalOpen, setGroupDetailsModalOpen] = useState(false);
+  const [pollModalOpen, setPollModalOpen] = useState(false);
+  const [messageToDelete, setMessageToDelete] = useState(null);
   const { deleteConversation, exitGroup, loading: actionLoading } = useDeleteConversation();
+
+  const handleCreatePoll = useCallback(async (pollData) => {
+    await onSendMessage(`📊 Poll: ${pollData.question}`, { poll: pollData });
+  }, [onSendMessage]);
 
   const handleConfirmDelete = async () => {
     await deleteConversation(conversationId || selectedConverstion?._id);
@@ -317,14 +326,17 @@ export function ConversationView({
   // AI: Generate contextual reply to a specific message
   const handleAIReplyToMessage = useCallback(async (msg) => {
     const targetText = msg.message || msg.body;
+    // First set the reply context so user sees "Replying to SendChat AI" banner
     setReplyingTo(msg);
+    textareaRef.current?.focus();
     toast.loading("Generating AI reply draft…", { id: "ai-reply" });
     const draft = await rewriteDraft(
-      `Draft a polite, helpful reply to this message: "${targetText}"`,
+      `Draft a short, polite reply to this message: "${targetText}"`,
       "casual"
     );
     toast.dismiss("ai-reply");
     if (draft) {
+      // Set the draft as the NEW message to send (what the user will say in reply)
       setText(draft);
       textareaRef.current?.focus();
       toast.success("AI reply draft ready!");
@@ -337,8 +349,8 @@ export function ConversationView({
   }, [onReact]);
 
   const handleDeleteItem = useCallback((msgId) => {
-    if (onDeleteMessage) onDeleteMessage(msgId);
-  }, [onDeleteMessage]);
+    setMessageToDelete(msgId);
+  }, []);
 
   const handleEditItem = useCallback((msg) => {
     setEditingMessage(msg);
@@ -376,13 +388,13 @@ export function ConversationView({
       <div className="flex items-center justify-between border-b border-border bg-card px-4 py-2.5 shadow-xs">
         <div className="flex items-center gap-1.5">
           {/* Back / Collapse active conversation (always accessible in split-windows) */}
-          <button 
+          {/* <button 
             onClick={() => setSelectedConverstion(null)}
             className="p-1.5 hover:bg-muted text-muted-foreground hover:text-foreground rounded-lg transition-colors flex items-center"
             title="Collapse conversation / Back to sidebar"
           >
             <ArrowLeft className="h-4.5 w-4.5" />
-          </button>
+          </button> */}
 
           {/* Sidebar Toggle button (collapse / expand sidebar) */}
           <button
@@ -481,6 +493,14 @@ export function ConversationView({
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
+                    onClick={() => setPollModalOpen(true)}
+                    className="cursor-pointer font-medium"
+                  >
+                    <BarChart2 className="h-4 w-4 mr-2 text-primary" />
+                    Create Poll
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
                     onClick={() => setExitDialogOpen(true)}
                     className="text-amber-600 dark:text-amber-400 focus:text-amber-600 focus:bg-amber-500/10 cursor-pointer"
                   >
@@ -506,14 +526,24 @@ export function ConversationView({
                   Clear AI History
                 </DropdownMenuItem>
               ) : (
-                <DropdownMenuItem
-                  onClick={() => setDeleteDialogOpen(true)}
-                  variant="destructive"
-                  className="cursor-pointer"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Delete Conversation
-                </DropdownMenuItem>
+                <>
+                  <DropdownMenuItem
+                    onClick={() => setPollModalOpen(true)}
+                    className="cursor-pointer font-medium"
+                  >
+                    <BarChart2 className="h-4 w-4 mr-2 text-primary" />
+                    Create Poll
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setDeleteDialogOpen(true)}
+                    variant="destructive"
+                    className="cursor-pointer"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Conversation
+                  </DropdownMenuItem>
+                </>
               )}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -650,6 +680,7 @@ export function ConversationView({
                     onReplyClick={scrollToMessage}
                     isHighlighted={highlightedId === (msg.id || msg._id)}
                     meId={me}
+                    presence={presence}
                     // AI props
                     translatedText={translations[msg.id || msg._id]}
                     showOriginal={showOriginals[msg.id || msg._id]}
@@ -659,6 +690,7 @@ export function ConversationView({
                     onExplain={handleExplainMessage}
                     onAIReply={handleAIReplyToMessage}
                     isAILoading={aiActionLoadingId === (msg.id || msg._id)}
+                    memberMap={memberMap}
                   />
                 );
               })}
@@ -791,6 +823,16 @@ export function ConversationView({
             </PopoverContent>
           </Popover>
 
+          {/* Create Poll Button */}
+          <button
+            type="button"
+            onClick={() => setPollModalOpen(true)}
+            className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0 cursor-pointer"
+            title="Create a Poll"
+          >
+            <BarChart2 className="h-4 w-4" />
+          </button>
+
           <textarea
             ref={textareaRef}
             value={text}
@@ -902,16 +944,49 @@ export function ConversationView({
         onOpenChange={setGroupDetailsModalOpen}
         conversation={selectedConverstion}
       />
+
+      {/* Create Poll Modal */}
+      <CreatePollModal
+        open={pollModalOpen}
+        onOpenChange={setPollModalOpen}
+        onCreatePoll={handleCreatePoll}
+      />
+
+      {/* Delete Single Message Confirmation Dialog */}
+      <AlertDialog open={Boolean(messageToDelete)} onOpenChange={(open) => !open && setMessageToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Message?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this message? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setMessageToDelete(null)}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={async () => {
+                if (messageToDelete && onDeleteMessage) {
+                  await onDeleteMessage(messageToDelete);
+                  setMessageToDelete(null);
+                }
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Confirm Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
 const MessageItem = memo(function MessageItem({
-  msg, mine, isAI, sender, showHeader, reactions, onReact, onDelete, onEdit, onReply, onForward, onReplyClick, isHighlighted, meId,
-  translatedText, showOriginal, onToggleOriginal, explanationText, onTranslate, onExplain, onAIReply, isAILoading
+  msg, mine, isAI, sender, showHeader, reactions, onReact, onDelete, onEdit, onReply, onForward, onReplyClick, isHighlighted, meId, presence = new Set(),
+  translatedText, showOriginal, onToggleOriginal, explanationText, onTranslate, onExplain, onAIReply, isAILoading, memberMap
 }) {
   const grouped = {};
-  reactions.forEach((r) => { (grouped[r.emoji] ??= []).push(r); });
+  (reactions || []).forEach((r) => { if (r && r.emoji) { (grouped[r.emoji] ??= []).push(r); } });
 
   const rawText = msg.message || msg.body;
   const displayText = translatedText && !showOriginal ? translatedText : rawText;
@@ -925,6 +1000,7 @@ const MessageItem = memo(function MessageItem({
             <ProfileHoverCard
               user={sender}
               isAI={isAI}
+              isOnline={isAI || Boolean(sender && presence.has(String(sender._id || sender.id || "")))}
               side="right"
               align="start"
             >
@@ -991,22 +1067,36 @@ const MessageItem = memo(function MessageItem({
                   </div>
                 )}
 
-                <div className="relative pb-2">
-                  <div className="whitespace-pre-wrap break-words pr-20 leading-relaxed min-w-[90px]">
-                    {displayText}
+                {msg.poll ? (
+                  <div className="relative pb-1">
+                    <PollCard msg={msg} meId={meId} />
+                    <div className="flex justify-end items-center gap-1 mt-1 pr-1 select-none">
+                      <span className="text-[9px] opacity-50 font-medium shrink-0">
+                        {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {mine && (
+                        <CheckCheck className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                      )}
+                    </div>
                   </div>
-                  <div className="absolute bottom-0 right-0 flex items-center gap-1 pb-0.5 pr-1.5 select-none">
-                    {msg.isEdited && (
-                      <span className="text-[9px] opacity-50 italic shrink-0">edited</span>
-                    )}
-                    <span className="text-[9px] opacity-50 font-medium shrink-0">
-                      {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    {mine && (
-                      <CheckCheck className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                    )}
+                ) : (
+                  <div className="relative pb-2">
+                    <div className="whitespace-pre-wrap break-words pr-20 leading-relaxed min-w-[90px]">
+                      {displayText}
+                    </div>
+                    <div className="absolute bottom-0 right-0 flex items-center gap-1 pb-0.5 pr-1.5 select-none">
+                      {msg.isEdited && (
+                        <span className="text-[9px] opacity-50 italic shrink-0">edited</span>
+                      )}
+                      <span className="text-[9px] opacity-50 font-medium shrink-0">
+                        {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                      {mine && (
+                        <CheckCheck className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* AI Explanation Box */}
                 {explanationText && (
@@ -1020,6 +1110,41 @@ const MessageItem = memo(function MessageItem({
               </>
             )}
           </div>
+
+          {/* Reaction chips & Reacting Persons' names */}
+          {Object.keys(grouped).length > 0 && !msg.isDeleted && (
+            <div className={`flex flex-wrap gap-1 mt-1 select-none ${mine ? "justify-end" : "justify-start"}`}>
+              {Object.entries(grouped).map(([emoji, reacts]) => {
+                const hasMyReaction = reacts.some(r => String(r.user?._id || r.user || "") === meId);
+                const names = reacts.map(r => {
+                  const id = String(r.user?._id || r.user || "");
+                  if (id === meId) return "You";
+                  return r.userName || memberMap?.get(id)?.name || memberMap?.get(id)?.display_name || "Someone";
+                });
+                const namesTooltip = `${names.join(", ")} reacted with ${emoji}`;
+
+                return (
+                  <button
+                    key={emoji}
+                    type="button"
+                    onClick={() => onReact && onReact(msgId, emoji)}
+                    title={namesTooltip}
+                    className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs transition-all cursor-pointer border shadow-2xs ${
+                      hasMyReaction
+                        ? "bg-primary/15 border-primary/40 text-primary font-medium"
+                        : "bg-card/90 hover:bg-accent border-border/80 text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <span>{emoji}</span>
+                    <span className="text-[11px] font-semibold">{reacts.length}</span>
+                    <span className="text-[10px] opacity-80 max-w-[130px] truncate">
+                      {names.length === 1 ? names[0] : `${names[0]}, ${names[1]}${names.length > 2 ? ` +${names.length - 2}` : ""}`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
           {/* Hover Menu */}
           <div className={"absolute -top-7 sm:-top-8 hidden items-center gap-0.5 rounded-full border border-border/80 bg-card/95 backdrop-blur-xs px-1.5 py-0.5 shadow-md group-hover:flex z-20 transition-all " + (mine ? "right-0" : "left-0")}>
@@ -1056,7 +1181,7 @@ const MessageItem = memo(function MessageItem({
                 </button>
 
                 {/* AI Reply */}
-                {!mine && (
+                {!mine && !isAI && (
                   <button 
                     onClick={() => onAIReply && onAIReply(msg)} 
                     className="grid h-6 w-6 place-items-center rounded-full hover:bg-accent text-muted-foreground hover:text-primary transition-colors" 
