@@ -8,6 +8,7 @@ import userGetMessages from '../../hooks/userGetMessages';
 import useListenMessages from '../../hooks/useListenMessages';
 import userSendMessage from '../../hooks/userSendMessage';
 import useDeleteMessage from '../../hooks/useDeleteMessage';
+import useReactMessage from '../../hooks/useReactMessage';
 import useTyping from '../../hooks/useTyping';
 
 const MessageContainer = () => {
@@ -24,6 +25,7 @@ const MessageContainer = () => {
     useListenMessages();
     const { sendMessage } = userSendMessage();
     const { deleteMessage } = useDeleteMessage();
+    const { reactToMessage } = useReactMessage();
     const { typingUsers, sendTyping } = useTyping();
 
     useEffect(() => {
@@ -32,6 +34,7 @@ const MessageContainer = () => {
 
     const handleSendMessage = useCallback((body, options) => sendMessage(body, options), [sendMessage]);
     const handleDeleteMessage = useCallback((id) => deleteMessage(id), [deleteMessage]);
+    const handleReact = useCallback((id, emoji) => reactToMessage(id, emoji), [reactToMessage]);
     const handleTypingChange = useCallback((isTyping) => sendTyping(isTyping), [sendTyping]);
 
     const getMembers = useCallback(() => {
@@ -98,6 +101,7 @@ const MessageContainer = () => {
                 messages={messages}
                 onSendMessage={handleSendMessage}
                 onDeleteMessage={handleDeleteMessage}
+                onReact={handleReact}
                 currentUser={authUser}
                 members={getMembers()}
                 presence={new Set(onlineUsers)}

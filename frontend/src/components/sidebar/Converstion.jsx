@@ -13,8 +13,9 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const Converstion = ({ converstion }) => {
-    const { selectedConverstion, setSelectedConverstion } = useConverstion();
+    const { selectedConverstion, setSelectedConverstion, unreadCounts = {} } = useConverstion();
     const isSelected = selectedConverstion?._id === converstion._id;
+    const unreadCount = unreadCounts[String(converstion._id)] || 0;
     const { onlineUsers } = useSocketContext();
     const isAI = converstion.isAI || converstion.type === "ai";
     const isOnline = isAI || onlineUsers.includes(converstion.userId || converstion._id);
@@ -97,9 +98,19 @@ const Converstion = ({ converstion }) => {
                         </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
-                        <span className="line-clamp-1 flex-1 text-xs opacity-70">
+                        <span className={`line-clamp-1 flex-1 text-xs ${unreadCount > 0 ? "font-semibold text-foreground" : "opacity-70"}`}>
                             {converstion.lastMessage || (isGroup ? `${converstion.membersCount || 2} members` : isAI ? "Ask me anything!" : "Start a conversation")}
                         </span>
+
+                        {/* Unread Message Badge & Count: sky blue dot with count */}
+                        {unreadCount > 0 && (
+                            <span 
+                                title={`${unreadCount} unread`} 
+                                className="shrink-0 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-sky-500 text-white text-[10px] font-bold shadow-xs shadow-sky-500/30 ring-2 ring-background animate-in zoom-in-75"
+                            >
+                                {unreadCount > 99 ? "99+" : unreadCount}
+                            </span>
+                        )}
 
                         {/* Quick options menu on hover */}
                         <div 

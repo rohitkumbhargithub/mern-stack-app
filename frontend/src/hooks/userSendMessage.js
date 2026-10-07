@@ -2,6 +2,9 @@ import { useState } from "react";
 import useConverstion from "../zustand/useConverstion";
 import { toast } from "sonner";
 
+// Tracks IDs of messages sent from this client session so incoming socket echo never triggers sound
+export const locallySentMessageIds = new Set();
+
 const userSendMessage = () => {
     const [loading, setLoading] = useState(false);
     const { messages, setMessages, selectedConverstion, updateConversation } = useConverstion();
@@ -22,14 +25,18 @@ const userSendMessage = () => {
                 headers['x-gemini-api-key'] = customKey.trim();
             }
 
+            const pollText = options.poll?.question ? `📊 Poll: ${options.poll.question}` : "";
+            const finalMessage = (message && typeof message === 'string' && message.trim()) ? message : (pollText || " ");
+
             const response = await fetch(`/api/messages/send/${targetConvId}`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({
-                    message,
+                    message: finalMessage,
                     replyTo: options.replyTo,
                     editId: options.editId,
-                    isForwarded: options.isForwarded || false
+                    isForwarded: options.isForwarded || false,
+                    poll: options.poll || undefined
                 })
             });
 
@@ -37,6 +44,10 @@ const userSendMessage = () => {
 
             if (data.error) {
                 throw new Error(data.error);
+            }
+
+            if (data._id) {
+                locallySentMessageIds.add(String(data._id));
             }
 
             if (String(targetConvId) === String(selectedConverstion?._id)) {
@@ -49,7 +60,7 @@ const userSendMessage = () => {
 
             if (updateConversation) {
                 updateConversation(targetConvId, {
-                    lastMessage: message,
+                    lastMessage: finalMessage,
                     lastMessageTime: new Date().toISOString()
                 });
             }
