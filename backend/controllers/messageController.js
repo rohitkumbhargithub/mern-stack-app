@@ -3,6 +3,7 @@ const Message = require("../models/messages");
 const { getReceiverSocketIds, io } = require("../socket/socket");
 const { isAIBotId, handleAIBotResponse, getOrCreateAIBotUser } = require("../utils/aiBot");
 const { decrypt } = require("../utils/crypto");
+const { sendPushToUser } = require("../services/pushService");
 
 
 exports.sendMessage = async (req, res) => {
@@ -77,6 +78,29 @@ exports.sendMessage = async (req, res) => {
                 io.to(socketId).emit("newMessage", newMessage);
             });
         });
+
+        // --- Web Push Notifications ---
+        // Send push to all participants EXCEPT the sender (non-blocking)
+        const senderName = req.user?.name || "Someone";
+        const previewText = message.length > 80 ? message.substring(0, 80) + "…" : message;
+        const conversationUrl = `/chat/${conversation._id}`;
+
+        const pushTargets = conversation.participated.filter(
+            pId => pId.toString() !== senderId.toString()
+        );
+
+        pushTargets.forEach(recipientId => {
+            sendPushToUser(recipientId, {
+                title: conversation.isGroupChat
+                    ? `${senderName} in ${conversation.chatName || "Group"}`
+                    : senderName,
+                body: previewText,
+                icon: req.user?.profile || '/icons/icon-192.png',
+                url: conversationUrl,
+                tag: `conv-${conversation._id}`, // Collapses multiple rapid messages from same chat
+            }).catch(err => console.error('[Push] sendPushToUser error:', err.message));
+        });
+        // ---------------------------------
 
         // Check if message is directed to AI Bot or contains @ai
         const aiBot = await getOrCreateAIBotUser();

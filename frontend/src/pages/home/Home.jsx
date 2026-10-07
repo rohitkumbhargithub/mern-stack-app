@@ -1,9 +1,12 @@
 import SideBar from '@/components/sidebar/SideBar';
 import useConverstion from '../../zustand/useConverstion';
 import MessageContainer from '@/components/message/MessageContainer';
+import usePushNotifications from '../../hooks/usePushNotifications';
 
 const Home = () => {
   const { selectedConverstion, isSidebarCollapsed } = useConverstion();
+  // Register service worker & subscribe to Web Push (runs once after login)
+  usePushNotifications();
 
   return (
     <div className="flex h-[100dvh] w-full overflow-hidden bg-background">

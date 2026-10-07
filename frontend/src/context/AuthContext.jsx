@@ -53,9 +53,28 @@ export const AuthContextProvider = ({ children }) => {
       localStorage.removeItem("chat-user");
       setAuthUser(null);
     };
+    const handleLogin = () => {
+      try {
+        const raw = localStorage.getItem("chat-user");
+        if (raw && raw !== "undefined" && raw !== "null") {
+          const parsed = JSON.parse(raw);
+          if (parsed && (parsed._id || parsed.id)) {
+            setAuthUser(parsed);
+            return;
+          }
+        }
+        setAuthUser(getInitialUser());
+      } catch (err) {
+        setAuthUser(getInitialUser());
+      }
+    };
 
     window.addEventListener("auth:unauthorized", handleUnauthorized);
-    return () => window.removeEventListener("auth:unauthorized", handleUnauthorized);
+    window.addEventListener("auth:login", handleLogin);
+    return () => {
+      window.removeEventListener("auth:unauthorized", handleUnauthorized);
+      window.removeEventListener("auth:login", handleLogin);
+    };
   }, []);
 
   return (

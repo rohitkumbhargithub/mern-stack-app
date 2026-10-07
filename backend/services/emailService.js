@@ -123,7 +123,7 @@ const sendViaBrevo = async ({ email, name, otp, htmlContent }) => {
  * @param {string} params.name - User display name
  * @param {string} params.otp - 6-digit OTP string
  */
-const sendLoginOtpEmail = async ({ email, name, otp }) => {
+const sendSignupOtpEmail = async ({ email, name, otp }) => {
     const rawUser = (process.env.SMTP_USER || process.env.GMAIL_USER || '').trim();
     
     // For Gmail and strict SMTP relays, sender address must match authenticated user
@@ -164,7 +164,7 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
         <div class="content">
           <div class="greeting">Hello <strong>${name || 'there'}</strong>,</div>
           <div class="message">
-            We received a request to log in to your SendChat account. Use the verification code below to complete sign-in:
+            We received a verify your email address to create your SendChat account. Use the verification code below to complete sign-in:
           </div>
           <div class="otp-box">
             <div class="otp-code">${otp}</div>
@@ -189,7 +189,7 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
     if (process.env.RESEND_API_KEY) {
         try {
             const info = await sendViaResend({ email, name, otp, htmlContent });
-            console.log(`📧 Login OTP email dispatched via Resend HTTP API to ${email} (ID: ${info.id})`);
+            console.log(`📧 Signup OTP email dispatched via Resend HTTP API to ${email} (ID: ${info.id})`);
             return { success: true, messageId: info.id, provider: 'resend' };
         } catch (resendErr) {
             console.error('⚠️ Resend HTTP API failed:', resendErr.message);
@@ -201,7 +201,7 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
     if (process.env.BREVO_API_KEY) {
         try {
             const info = await sendViaBrevo({ email, name, otp, htmlContent });
-            console.log(`📧 Login OTP email dispatched via Brevo HTTP API to ${email} (ID: ${info.messageId})`);
+            console.log(`📧 Signup OTP email dispatched via Brevo HTTP API to ${email} (ID: ${info.messageId})`);
             return { success: true, messageId: info.messageId, provider: 'brevo' };
         } catch (brevoErr) {
             console.error('⚠️ Brevo HTTP API failed:', brevoErr.message);
@@ -243,7 +243,7 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
 
     // Console Fallback so user/developer is NEVER locked out of logging in
     console.log('\n' + '═'.repeat(60));
-    console.log('🔐 [SENDCHAT SECURITY] LOGIN VERIFICATION CODE DISPATCH');
+    console.log('🔐 [SENDCHAT SECURITY] SIGNUP VERIFICATION CODE DISPATCH');
     console.log(`👤 Recipient : ${name || 'User'} <${email}>`);
     console.log(`🔢 OTP Code  : >>> ${otp} <<<`);
     console.log('⏱  Valid For : 5 Minutes (Single-Use)');
@@ -256,5 +256,6 @@ const sendLoginOtpEmail = async ({ email, name, otp }) => {
 };
 
 module.exports = {
-    sendLoginOtpEmail,
+    sendSignupOtpEmail,
+    sendLoginOtpEmail: sendSignupOtpEmail,
 };

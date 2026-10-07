@@ -1,69 +1,120 @@
-import { useState } from "react"
+import { useState } from "react";
 import { toast } from "sonner";
-import { useAuthContext } from "../context/AuthContext";
 
-const userSignup = () => {
-
+const useSignup = () => {
     const [loading, setLoading] = useState(false);
-    const {setAuthUser} = useAuthContext();
-    
-    const signup = async ({name,email,password,confirmPassword,gender}) => {
-        const success = handleInputsErrors({name,email,password,confirmPassword,gender});
-        if(!success) return;
+    const [otpLoading, setOtpLoading] = useState(false);
+    const [resendLoading, setResendLoading] = useState(false);
+    const [otpStep, setOtpStep] = useState(false);
+    const [otpEmail, setOtpEmail] = useState("");
+
+    const handleInputsErrors = ({ name, email, password, confirmPassword, gender }) => {
+        if (!name || !email || !password || !confirmPassword || !gender) {
+            toast.error("Please fill in all fields");
+            return true;
+        }
+        if (password !== confirmPassword) {
+            toast.error("Passwords do not match");
+            return true;
+        }
+        if (password.length < 6) {
+            toast.error("Password must be at least 6 characters");
+            return true;
+        }
+        return false;
+    };
+
+    const signup = async (inputs) => {
+        const { name, email, password, confirmPassword, gender } = inputs;
+        if (handleInputsErrors({ name, email, password, confirmPassword, gender })) return;
 
         setLoading(true);
-
-        try{
-
-            const response = await fetch("/api/auth/signup", {
-                method: "POST",
-                headers: {
-                    'Content-type': 'application/json'
-                },
-                body: JSON.stringify({name, email, password, confirmPassword, gender})
+        try {
+            const res = await fetch('/api/auth/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name, email, password, confirmPassword, gender })
             });
 
-            // Safely parse the response - body may be empty or non-JSON
-            const text = await response.text();
-            const data = text ? JSON.parse(text) : {};
-
-            if(!response.ok){
-                throw new Error(data.error || "Signup failed");
+            const data = await res.json();
+            if (!res.ok) {
+                toast.error(data.error || 'Failed to send verification code');
+                return;
             }
 
-            // localstorage 
-            localStorage.setItem("chat-user", JSON.stringify(data));
-
-            // context
-           setAuthUser(data);
-
-        }catch(err){
-            toast.error(err.message);
-        }finally{
+            setOtpEmail(data.email || email);
+            setOtpStep(true);
+            toast.success(data.message || 'Verification code sent to your email');
+            return data;
+        } catch (error) {
+            toast.error(error.message);
+        } finally {
             setLoading(false);
         }
     };
-    return {loading, signup}
+
+    const verifyOtp = async (email, otp) => {
+        if (!email || !otp) {
+            toast.error('Email and OTP are required');
+            return;
+        }
+
+        setOtpLoading(true);
+        try {
+            const res = await fetch('/api/auth/signup/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'include',
+                body: JSON.stringify({ email, otp })
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                toast.error(data.error || 'Invalid verification code');
+                return;
+            }
+
+            localStorage.setItem('chat-user', JSON.stringify(data));
+            const authEvent = new Event('auth:login');
+            window.dispatchEvent(authEvent);
+            toast.success('Account created successfully! Welcome!');
+            return data;
+        } catch (error) {
+            toast.error(error.message);
+        } finally {
+            setOtpLoading(false);
+        }
+    };
+
+    const resendOtp = async (email) => {
+        if (!email) return;
+        setResendLoading(true);
+        try {
+            const res = await fetch('/api/auth/signup/resend', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+
+            const data = await res.json();
+            if (!res.ok) {
+                toast.error(data.error || 'Failed to resend code');
+                return;
+            }
+            toast.success(data.message || 'Verification code resent');
+            return data;
+        } catch (error) {
+            toast.error(error.message);
+        } finally {
+            setResendLoading(false);
+        }
+    };
+
+    const resetOtpStep = () => {
+        setOtpStep(false);
+    };
+
+    return { loading, otpLoading, resendLoading, otpStep, otpEmail, signup, verifyOtp, resendOtp, resetOtpStep };
 };
 
-export default userSignup;
-
-
-function handleInputsErrors({name, email, password, confirmPassword, gender}){
-    if(!name || !email || !password || !confirmPassword || !gender){
-        toast.error("Fill's all field!.");
-        return false;
-    }
-
-    if(password !== confirmPassword){
-        toast.error("password not match!.");
-        return false;
-    }
-
-    if(password.length < 6){
-        toast.error("password must be at least 6 character!.");
-        return false;
-    }
-
-    return true;
-}
+export default useSignup;

@@ -10,6 +10,7 @@ const authRoutes = require('./routes/authRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const userRoutes = require('./routes/userRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const pushRoutes = require('./routes/pushRoutes');
 const connectToDb = require('./db/mongoose');
 const { app, server } = require('./socket/socket');
 
@@ -31,6 +32,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/push', pushRoutes);
 
 app.use(express.static(path.join(__variableOfChoice, "/frontend/dist")));
 
