@@ -193,6 +193,15 @@ const sendSignupOtpEmail = async ({ email, name, otp }) => {
             return { success: true, messageId: info.id, provider: 'resend' };
         } catch (resendErr) {
             console.error('⚠️ Resend HTTP API failed:', resendErr.message);
+            if (resendErr.message && (resendErr.message.includes('only send testing emails') || resendErr.message.includes('verify a domain') || resendErr.message.includes('validation_error') || resendErr.message.includes('403'))) {
+                console.error('\n' + '═'.repeat(60));
+                console.error('🚨 [RESEND RESTRICTION - TEST MODE]');
+                console.error(`   Resend test domain (onboarding@resend.dev) ONLY allows sending to your own registered account email (${rawUser || 'your Resend email'}).`);
+                console.error(`   Attempted recipient : ${email}`);
+                console.error('   👉 To send to new emails: Add & verify a domain at https://resend.com/domains');
+                console.error('   👉 Or configure BREVO_API_KEY (free 300 emails/day, no custom domain needed).');
+                console.error('═'.repeat(60) + '\n');
+            }
             deliveryError = `Resend: ${resendErr.message}`;
         }
     }

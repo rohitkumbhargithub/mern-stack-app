@@ -63,17 +63,25 @@ exports.signup = exports.requestSignupOtp = async (req, res) => {
             { upsert: true, new: true }
         );
 
-        sendSignupOtpEmail({
+        const emailResult = await sendSignupOtpEmail({
             email: normalizedEmail,
             name: name,
             otp: otpCode,
-        }).catch(err => console.error("Async signup OTP email error:", err));
+        }).catch(err => {
+            console.error("Async signup OTP email error:", err);
+            return { success: false, deliveryError: err.message };
+        });
+
+        const isDeliveryFallback = emailResult?.devMode || !emailResult?.success;
 
         return res.status(200).json({
             requiresVerification: true,
             email: normalizedEmail,
-            message: "Verification code sent to your email.",
+            message: isDeliveryFallback && process.env.NODE_ENV !== 'production'
+                ? `Verification code generated (Dev fallback OTP: ${otpCode})`
+                : "Verification code sent to your email.",
             expiresIn: 300,
+            ...(isDeliveryFallback && process.env.NODE_ENV !== 'production' ? { devOtp: otpCode } : {})
         });
     } catch (err) {
         console.error('signup request error:', err);
@@ -209,15 +217,23 @@ exports.resendSignupOtp = async (req, res) => {
         pending.createdAt = new Date();
         await pending.save();
 
-        sendSignupOtpEmail({
+        const emailResult = await sendSignupOtpEmail({
             email: normalizedEmail,
             name: pending.payload.name,
             otp: otpCode,
-        }).catch(err => console.error("Async signup OTP resend error:", err));
+        }).catch(err => {
+            console.error("Async signup OTP resend error:", err);
+            return { success: false, deliveryError: err.message };
+        });
+
+        const isDeliveryFallback = emailResult?.devMode || !emailResult?.success;
 
         return res.status(200).json({
-            message: "A new verification code has been sent to your email.",
+            message: isDeliveryFallback && process.env.NODE_ENV !== 'production'
+                ? `A new verification code was generated (Dev fallback OTP: ${otpCode})`
+                : "A new verification code has been sent to your email.",
             expiresIn: 300,
+            ...(isDeliveryFallback && process.env.NODE_ENV !== 'production' ? { devOtp: otpCode } : {})
         });
     } catch (err) {
         console.error('signup resend error:', err);

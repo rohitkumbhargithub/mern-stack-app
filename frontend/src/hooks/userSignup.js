@@ -44,7 +44,11 @@ const useSignup = () => {
 
             setOtpEmail(data.email || email);
             setOtpStep(true);
-            toast.success(data.message || 'Verification code sent to your email');
+            if (data.devOtp) {
+                toast.info(`[Dev Mode] Verification OTP: ${data.devOtp}`, { duration: 12000 });
+            } else {
+                toast.success(data.message || 'Verification code sent to your email');
+            }
             return data;
         } catch (error) {
             toast.error(error.message);
@@ -101,7 +105,11 @@ const useSignup = () => {
                 toast.error(data.error || 'Failed to resend code');
                 return;
             }
-            toast.success(data.message || 'Verification code resent');
+            if (data.devOtp) {
+                toast.info(`[Dev Mode] Verification OTP: ${data.devOtp}`, { duration: 12000 });
+            } else {
+                toast.success(data.message || 'Verification code resent');
+            }
             return data;
         } catch (error) {
             toast.error(error.message);
