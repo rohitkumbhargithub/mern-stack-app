@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAuthContext } from '../context/AuthContext';
+import { isNotificationsEnabled } from '../utils/soundManager';
 
 /**
  * Converts a VAPID base64 string to Uint8Array (required by pushManager.subscribe)
@@ -128,6 +129,36 @@ export const usePushNotifications = () => {
             return 'denied';
         }
     }, [swRegistration, subscribeToServerPush]);
+
+    // 4. Auto-enable notifications seamlessly on user interaction without requiring an intrusive banner
+    useEffect(() => {
+        if (!authUser) return;
+        if (typeof window === 'undefined' || !('Notification' in window)) return;
+        if (!isNotificationsEnabled()) return;
+        if (Notification.permission !== 'default') return;
+
+        const autoEnableOnInteraction = () => {
+            requestNotificationPermission().catch(() => {});
+            window.removeEventListener('click', autoEnableOnInteraction);
+            window.removeEventListener('keydown', autoEnableOnInteraction);
+            window.removeEventListener('touchstart', autoEnableOnInteraction);
+        };
+
+        window.addEventListener('click', autoEnableOnInteraction, { once: true });
+        window.addEventListener('keydown', autoEnableOnInteraction, { once: true });
+        window.addEventListener('touchstart', autoEnableOnInteraction, { once: true });
+
+        // Also attempt direct request (if browser permits without gesture)
+        try {
+            requestNotificationPermission().catch(() => {});
+        } catch (_) {}
+
+        return () => {
+            window.removeEventListener('click', autoEnableOnInteraction);
+            window.removeEventListener('keydown', autoEnableOnInteraction);
+            window.removeEventListener('touchstart', autoEnableOnInteraction);
+        };
+    }, [authUser, requestNotificationPermission]);
 
     return {
         permission,

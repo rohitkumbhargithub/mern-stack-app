@@ -6,12 +6,14 @@ import useConverstion from '../zustand/useConverstion';
 import notification from '../assets/sounds/notification.mp3';
 import { locallySentMessageIds } from './userSendMessage';
 import { generateAvatarDataUrl } from '../utils/avatarGenerator';
+import { saveCachedPoll, getCachedPoll, cleanMessageText } from '../utils/pollCache';
+import { playNotificationSound, isNotificationsEnabled } from '../utils/soundManager';
 
 // Safely extract string ID from any user or ID representation
 const getCleanId = (val) => {
     if (!val) return "";
     if (typeof val === "object") {
-        return String(val._id || val.id || val.userId || "");
+        return String(val._id || val.id || val.userId || (val.user && (val.user._id || val.user.id)) || "");
     }
     return String(val).trim();
 };
@@ -70,10 +72,7 @@ const useListenMessages = () => {
         // Only play sound and notify if message is received from someone else
         if (!isFromMe) {
             newMessage.shouldShake = true;
-            try {
-                const sound = new Audio(notification);
-                sound.play().catch(() => {}); // Gracefully ignore browser autoplay policy restrictions
-            } catch (_) {}
+            playNotificationSound();
 
             // Increment unread count for the conversation if not currently focused
             const isDifferentChat = !selectedConverstion || String(selectedConverstion._id) !== String(newMessage.conversationId);
@@ -81,10 +80,32 @@ const useListenMessages = () => {
                 incrementUnread(newMessage.conversationId);
             }
 
-            // Google Chat-style desktop notification when tab is in background OR user is viewing a different chat
+            // Check if current user is tagged / mentioned
+            const myId = String(authUser?._id || authUser?.id || "");
+            const myName = (authUser?.name || "").toLowerCase();
+            const myUsername = (authUser?.username || "").toLowerCase();
+            const rawMsgText = (newMessage.message || newMessage.body || "");
+            const msgTextLower = rawMsgText.toLowerCase();
+
+            const isMentioned = (
+                (Array.isArray(newMessage.mentions) && newMessage.mentions.map(String).includes(myId)) ||
+                msgTextLower.includes("@everyone") ||
+                (myName && msgTextLower.includes(`@${myName}`)) ||
+                (myUsername && msgTextLower.includes(`@${myUsername}`))
+            );
+
+            // In-app mention alert banner/toast if mentioned
+            if (isMentioned) {
+                const mentionSender = newMessage.senderName || "Someone";
+                toast.info(`🔔 ${mentionSender} tagged you: "${cleanMessageText(rawMsgText).slice(0, 60)}"`, {
+                    duration: 6000
+                });
+            }
+
+            // Google Chat-style desktop notification when tab is in background OR user is viewing a different chat OR user is mentioned
             const isTabHidden = typeof document !== 'undefined' && document.hidden;
 
-            if (isTabHidden || isDifferentChat) {
+            if (isNotificationsEnabled() && (isTabHidden || isDifferentChat || isMentioned)) {
                 // Access fresh conversations directly from zustand store
                 const allConversations = useConverstion.getState().conversations || conversations || [];
                 const conv = allConversations.find(c => String(c._id) === String(newMessage.conversationId));
@@ -105,10 +126,12 @@ const useListenMessages = () => {
                     senderName = conv?.name || "SendChat User";
                 }
 
-                // Determine notification title with their real name
-                const title = conv?.isGroupChat
-                    ? `${senderName} in ${conv.name || "Group"}`
-                    : senderName;
+                // Determine notification title with mention indicator
+                const title = isMentioned
+                    ? `🔔 ${senderName} tagged you in ${conv?.name || "Group"}`
+                    : (conv?.isGroupChat
+                        ? `${senderName} in ${conv.name || "Group"}`
+                        : senderName);
                 const bodyText = (newMessage.message || newMessage.body || "New message").slice(0, 120);
 
                 // Ensure icon is a valid image URL, otherwise generate the Text/Initials avatar like in the sidebar
@@ -189,6 +212,13 @@ const useListenMessages = () => {
             }
         }
 
+        // Attach and cache poll data if available or embedded in message
+        const pollData = newMessage.poll || getCachedPoll(newMessage);
+        if (pollData) {
+            newMessage.poll = pollData;
+            saveCachedPoll(newMessage._id || newMessage.id, pollData);
+        }
+
         setMessages((prev) => {
             const newId = newMessage._id || newMessage.id;
             // Prevent duplicate message insertions (e.g. if optimistic update or multi-broadcast)
@@ -200,8 +230,9 @@ const useListenMessages = () => {
 
         // Update last message preview in conversations list
         if (newMessage.conversationId) {
+            const rawMsg = newMessage.message || newMessage.body || "";
             updateConversation(newMessage.conversationId, {
-                lastMessage: newMessage.message || newMessage.body || "",
+                lastMessage: cleanMessageText(rawMsg),
                 lastMessageTime: newMessage.createdAt || new Date().toISOString()
             });
         }
@@ -252,6 +283,25 @@ const useListenMessages = () => {
         }
     };
 
+    const handleGroupUpdated = ({ conversationId, name, groupAvatar }) => {
+        updateConversation(conversationId, { 
+            name, 
+            chatName: name, 
+            groupAvatar, 
+            profile: groupAvatar 
+        });
+        if (selectedConverstion && String(selectedConverstion._id) === String(conversationId)) {
+            setSelectedConverstion(prev => ({
+                ...prev,
+                name,
+                chatName: name,
+                groupAvatar,
+                profile: groupAvatar
+            }));
+            toast.info(`Group info updated to "${name}"`);
+        }
+    };
+
     const handleNewConversation = (groupPayload) => {
         addConversation(groupPayload);
     };
@@ -263,6 +313,7 @@ const useListenMessages = () => {
     socket.on("conversationCleared", handleConversationCleared);
     socket.on("userLeftGroup", handleUserLeftGroup);
     socket.on("groupMembersUpdated", handleGroupMembersUpdated);
+    socket.on("groupUpdated", handleGroupUpdated);
     socket.on("newConversation", handleNewConversation);
 
     return () => {
@@ -273,6 +324,7 @@ const useListenMessages = () => {
         socket.off("conversationCleared", handleConversationCleared);
         socket.off("userLeftGroup", handleUserLeftGroup);
         socket.off("groupMembersUpdated", handleGroupMembersUpdated);
+        socket.off("groupUpdated", handleGroupUpdated);
         socket.off("newConversation", handleNewConversation);
     };
   }, [socket, setMessages, removeConversation, addConversation, updateConversation, selectedConverstion, setSelectedConverstion, authUser]);

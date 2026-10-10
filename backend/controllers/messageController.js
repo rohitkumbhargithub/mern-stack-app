@@ -8,7 +8,7 @@ const { sendPushToUser } = require("../services/pushService");
 
 exports.sendMessage = async (req, res) => {
     try {
-        const { message, replyTo, editId, isForwarded, poll } = req.body;
+        const { message, replyTo, editId, isForwarded, poll, mentions } = req.body;
         const { id: targetId } = req.params;
         const senderId = req.user._id;
         const userApiKey = req.headers["x-gemini-api-key"] || (req.user?.aiSettings?.geminiApiKey ? decrypt(req.user.aiSettings.geminiApiKey) : null);
@@ -51,13 +51,26 @@ exports.sendMessage = async (req, res) => {
         const rawText = typeof message === "string" ? message : "";
         const pollText = poll && poll.question ? `📊 Poll: ${poll.question}` : rawText;
 
+        // Extract and resolve tagged / mentioned user IDs
+        let mentionUserIds = Array.isArray(mentions) ? mentions.map(String) : [];
+        if (rawText.toLowerCase().includes("@everyone") && conversation.participated) {
+            conversation.participated.forEach(p => {
+                const pId = (p?._id || p)?.toString();
+                if (pId && pId !== senderId.toString()) {
+                    mentionUserIds.push(pId);
+                }
+            });
+        }
+        mentionUserIds = Array.from(new Set(mentionUserIds));
+
         const newMessage = new Message({
             senderId,
             conversationId: conversation._id,
             message: pollText || " ",
             replyTo: replyTo || undefined,
             isForwarded: Boolean(isForwarded),
-            poll: poll || undefined
+            mentions: mentionUserIds,
+            poll: (poll && poll.question && Array.isArray(poll.options) && poll.options.length >= 2) ? poll : undefined
         });
 
         if (newMessage) {
@@ -76,7 +89,10 @@ exports.sendMessage = async (req, res) => {
             ...(newMessage.toObject ? newMessage.toObject() : newMessage),
             senderId: req.user._id.toString(),
             senderName: req.user?.name || req.user?.display_name || "Someone",
-            senderProfile: req.user?.profile || ""
+            senderProfile: req.user?.profile || "",
+            conversationName: conversation.chatName || "",
+            isGroupChat: Boolean(conversation.isGroupChat),
+            mentions: mentionUserIds
         };
 
         const targetSocketIds = new Set();
@@ -106,14 +122,19 @@ exports.sendMessage = async (req, res) => {
         pushTargets.forEach(recipientId => {
             const cleanRecId = (recipientId?._id || recipientId)?.toString();
             if (cleanRecId) {
-                sendPushToUser(cleanRecId, {
-                    title: conversation.isGroupChat
+                const isMentioned = mentionUserIds.includes(cleanRecId);
+                const title = isMentioned
+                    ? `🔔 ${senderName} tagged you in ${conversation.chatName || "Group"}`
+                    : (conversation.isGroupChat
                         ? `${senderName} in ${conversation.chatName || "Group"}`
-                        : senderName,
+                        : senderName);
+
+                sendPushToUser(cleanRecId, {
+                    title,
                     body: previewText,
                     icon: req.user?.profile || '/icons/icon-192.png',
                     url: conversationUrl,
-                    tag: `conv-${conversation._id}`, // Collapses multiple rapid messages from same chat
+                    tag: isMentioned ? `mention-${conversation._id}-${Date.now()}` : `conv-${conversation._id}`,
                 }).catch(err => console.error('[Push] sendPushToUser error:', err.message));
             }
         });

@@ -42,13 +42,15 @@ const MessageContainer = () => {
             const list = selectedConverstion.participated.map(p => {
                 const isObj = typeof p === 'object' && p !== null;
                 const id = isObj ? (p._id || p.id) : p;
-                const name = isObj ? (p.name || p.display_name || "Member") : "Member";
+                const name = isObj ? (p.name || p.display_name || p.username || "Member") : "Member";
+                const username = isObj ? (p.username || "") : "";
                 const profile = isObj ? (p.profile || p.avatar_url || "") : "";
                 return {
                     _id: id,
                     id: id,
                     display_name: name,
                     name: name,
+                    username: username,
                     avatar_url: profile,
                     profile: profile
                 };
@@ -59,6 +61,7 @@ const MessageContainer = () => {
                     id: authUser._id,
                     display_name: authUser.name,
                     name: authUser.name,
+                    username: authUser.username || "",
                     avatar_url: authUser.profile,
                     profile: authUser.profile
                 });
@@ -72,6 +75,7 @@ const MessageContainer = () => {
                 id: authUser._id,
                 display_name: authUser.name,
                 name: authUser.name,
+                username: authUser.username || "",
                 avatar_url: authUser.profile,
                 profile: authUser.profile
             },
@@ -80,6 +84,7 @@ const MessageContainer = () => {
                 id: selectedConverstion?.userId || selectedConverstion?._id,
                 display_name: selectedConverstion?.name,
                 name: selectedConverstion?.name,
+                username: selectedConverstion?.username || "",
                 avatar_url: selectedConverstion?.profile,
                 profile: selectedConverstion?.profile,
                 isAI: selectedConverstion?.isAI || selectedConverstion?.type === "ai",

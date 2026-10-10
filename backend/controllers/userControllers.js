@@ -419,6 +419,82 @@ exports.exitGroup = async (req, res) => {
     }
 };
 
+exports.removeGroupMember = async (req, res) => {
+    try {
+        const { id: groupId } = req.params;
+        const { memberId } = req.body;
+        const loggedInUserId = req.user._id;
+
+        const group = await Converastion.findById(groupId);
+        if (!group || !group.isGroupChat) {
+            return res.status(404).json({ error: "Group not found" });
+        }
+
+        const adminId = (group.groupAdmin || group.participated[0]).toString();
+        if (adminId !== loggedInUserId.toString()) {
+            return res.status(403).json({ error: "Only the group admin can remove members" });
+        }
+
+        if (memberId.toString() === adminId) {
+            return res.status(400).json({ error: "Cannot remove the group admin" });
+        }
+
+        group.participated = group.participated.filter(
+            p => p.toString() !== memberId.toString()
+        );
+
+        const Message = require("../models/messages");
+        const { getReceiverSocketIds, io } = require("../socket/socket");
+
+        const targetUser = await User.findById(memberId);
+        const removedName = targetUser ? (targetUser.name || targetUser.username) : "A member";
+
+        const systemMessage = new Message({
+            senderId: loggedInUserId,
+            conversationId: group._id,
+            message: `${req.user.name || "Admin"} removed ${removedName} from the group.`
+        });
+        await systemMessage.save();
+        group.messages.push(systemMessage._id);
+        await group.save();
+
+        // Notify removed user
+        const removedSocketIds = getReceiverSocketIds(memberId);
+        removedSocketIds.forEach(sId => {
+            io.to(sId).emit("conversationDeleted", { conversationId: groupId });
+        });
+
+        // Notify remaining group members
+        group.participated.forEach(pId => {
+            const socketIds = getReceiverSocketIds(pId);
+            socketIds.forEach(sId => {
+                io.to(sId).emit("groupMembersUpdated", {
+                    conversationId: groupId,
+                    participated: group.participated,
+                    membersCount: group.participated.length
+                });
+                io.to(sId).emit("newMessage", systemMessage);
+            });
+        });
+
+        io.to(groupId.toString()).emit("groupMembersUpdated", {
+            conversationId: groupId,
+            participated: group.participated,
+            membersCount: group.participated.length
+        });
+        io.to(groupId.toString()).emit("newMessage", systemMessage);
+
+        return res.status(200).json({
+            message: `${removedName} was removed from the group`,
+            conversationId: groupId
+        });
+    } catch (err) {
+        console.error("removeGroupMember error:", err);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+
 exports.getGroupDetails = async (req, res) => {
     try {
         const { id: groupId } = req.params;
@@ -566,5 +642,96 @@ exports.addGroupMembers = async (req, res) => {
     } catch (err) {
         console.error("addGroupMembers error:", err);
         return res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+exports.updateGroupDetails = async (req, res) => {
+    try {
+        const { id: groupId } = req.params;
+        const { name, groupAvatar } = req.body;
+        const loggedInUserId = req.user._id;
+
+        if (!groupId || groupId === "undefined") {
+            return res.status(400).json({ error: "Group ID is missing or invalid" });
+        }
+
+        const group = await Converastion.findById(groupId);
+        if (!group) {
+            return res.status(404).json({ error: "Group conversation not found in database" });
+        }
+
+        // Allow update if marked isGroupChat OR has multiple participants OR has chatName
+        const isGroup = Boolean(group.isGroupChat || group.chatName || (group.participated && group.participated.length > 2));
+        if (!isGroup) {
+            return res.status(400).json({ error: "This conversation is not a group" });
+        }
+
+        const adminObj = group.groupAdmin || (group.participated && group.participated[0]);
+        const adminId = adminObj ? String(adminObj._id || adminObj.id || adminObj) : null;
+        if (adminId && adminId !== loggedInUserId.toString()) {
+            return res.status(403).json({ error: "Only the group creator/admin can edit group details" });
+        }
+
+        group.isGroupChat = true;
+        if (name && name.trim()) {
+            group.chatName = name.trim();
+        }
+        if (typeof groupAvatar === "string") {
+            group.groupAvatar = groupAvatar.trim();
+        }
+
+        const Message = require("../models/messages");
+        const { getReceiverSocketIds, io } = require("../socket/socket");
+
+        const systemMessage = new Message({
+            senderId: loggedInUserId,
+            conversationId: group._id,
+            message: `${req.user.name || "Admin"} updated group information.`
+        });
+        await systemMessage.save();
+        group.messages.push(systemMessage._id);
+        await group.save();
+
+        const populatedGroup = await Converastion.findById(groupId)
+            .populate("participated", "-password -aiSettings")
+            .populate("groupAdmin", "-password -aiSettings");
+
+        const updatePayload = {
+            conversationId: groupId,
+            name: populatedGroup.chatName,
+            groupAvatar: populatedGroup.groupAvatar
+        };
+
+        // Notify participants in real-time
+        if (populatedGroup.participated && Array.isArray(populatedGroup.participated)) {
+            populatedGroup.participated.forEach(p => {
+                const pId = p._id ? p._id.toString() : p.toString();
+                const socketIds = getReceiverSocketIds(pId);
+                socketIds.forEach(sId => {
+                    io.to(sId).emit("groupUpdated", updatePayload);
+                    io.to(sId).emit("newMessage", systemMessage);
+                });
+            });
+        }
+
+        io.to(groupId.toString()).emit("groupUpdated", updatePayload);
+        io.to(groupId.toString()).emit("newMessage", systemMessage);
+
+        return res.status(200).json({
+            message: "Group updated successfully",
+            group: {
+                _id: populatedGroup._id,
+                name: populatedGroup.chatName,
+                groupAvatar: populatedGroup.groupAvatar,
+                groupAdmin: populatedGroup.groupAdmin,
+                participated: populatedGroup.participated,
+                membersCount: populatedGroup.participated.length,
+                createdAt: populatedGroup.createdAt,
+                updatedAt: populatedGroup.updatedAt
+            }
+        });
+    } catch (err) {
+        console.error("updateGroupDetails error:", err);
+        return res.status(500).json({ error: err.message || "Failed to update group" });
     }
 };
