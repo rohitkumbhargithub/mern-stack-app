@@ -4,7 +4,8 @@ import {
   Send, Paperclip, Smile, X, Users, User as UserIcon, Check, CheckCheck, 
   FileText, Image as ImageIcon, Loader2, MessageCircle, Trash2, Pencil, 
   Reply, Forward, MoreVertical, ArrowLeft, Sparkles, Globe, HelpCircle, Bot,
-  ShieldCheck, Lock, PanelLeft, PanelLeftClose, LogOut, BarChart2
+  ShieldCheck, Lock, PanelLeft, PanelLeftClose, LogOut, BarChart2, CircleSlash2,
+  AtSign
 } from "lucide-react";
 import {
   Popover, PopoverContent, PopoverTrigger,
@@ -30,8 +31,72 @@ import { ForwardMessageModal } from "./ForwardMessageModal";
 import { GroupDetailsModal } from "./GroupDetailsModal";
 import { CreatePollModal } from "./CreatePollModal";
 import { PollCard } from "./PollCard";
+import { getCachedPoll, formatPollMessage, cleanMessageText, isValidPoll } from "../../utils/pollCache";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "✅"];
+
+function renderFormattedMessage(text, currentUser, mine) {
+  if (!text || typeof text !== "string") return text;
+
+  // Split text by mentions (@everyone or @name)
+  const mentionRegex = /(@everyone|@[a-zA-Z0-9_]+(?:\s[a-zA-Z0-9_]+)?)/g;
+  const parts = text.split(mentionRegex);
+
+  if (parts.length <= 1) return text;
+
+  const myName = (currentUser?.name || "").toLowerCase();
+  const myUsername = (currentUser?.username || "").toLowerCase();
+
+  return parts.map((part, index) => {
+    if (!part) return null;
+
+    if (part.startsWith("@")) {
+      const lower = part.toLowerCase();
+      const isEveryone = lower === "@everyone";
+      const isMe = !isEveryone && (
+        (myName && (lower === `@${myName}` || lower.startsWith(`@${myName} `))) ||
+        (myUsername && (lower === `@${myUsername}` || lower.startsWith(`@${myUsername} `)))
+      );
+
+      if (isEveryone) {
+        return (
+          <span
+            key={index}
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md font-semibold text-xs bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shadow-2xs select-none"
+          >
+            {part}
+          </span>
+        );
+      }
+
+      if (isMe) {
+        return (
+          <span
+            key={index}
+            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md font-semibold text-xs bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/40 shadow-2xs select-none"
+          >
+            {part}
+          </span>
+        );
+      }
+
+      return (
+        <span
+          key={index}
+          className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md font-medium text-xs select-none ${
+            mine
+              ? "bg-white/20 text-white border border-white/30"
+              : "bg-primary/15 text-primary border border-primary/25"
+          }`}
+        >
+          {part}
+        </span>
+      );
+    }
+
+    return <span key={index}>{part}</span>;
+  });
+}
 
 export function ConversationView({
   conversationId,
@@ -70,6 +135,12 @@ export function ConversationView({
   const [editingMessage, setEditingMessage] = useState(null);
   const [highlightedId, setHighlightedId] = useState(null);
 
+  // Mentions / Tagging State
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionPosition, setMentionPosition] = useState(0);
+  const [trackedMentions, setTrackedMentions] = useState([]);
+
   // AI State
   const { fetchSmartReplies, rewriteDraft, summarizeThread, translateMessage, loadingAction } = useAI();
   const [smartReplies, setSmartReplies] = useState([]);
@@ -92,7 +163,8 @@ export function ConversationView({
   const { deleteConversation, exitGroup, loading: actionLoading } = useDeleteConversation();
 
   const handleCreatePoll = useCallback(async (pollData) => {
-    await onSendMessage(`📊 Poll: ${pollData.question}`, { poll: pollData });
+    const formatted = formatPollMessage(pollData);
+    await onSendMessage(formatted, { poll: pollData });
   }, [onSendMessage]);
 
   const handleConfirmDelete = async () => {
@@ -105,12 +177,18 @@ export function ConversationView({
     setExitDialogOpen(false);
   };
 
-  // Reset replying, editing, and input state whenever conversationId changes
+  // Reset replying, editing, and input state whenever conversationId changes, and focus input
   useEffect(() => {
     setReplyingTo(null);
     setEditingMessage(null);
     setText("");
     setSmartReplies([]);
+    setMentionQuery(null);
+    setTrackedMentions([]);
+    const focusTimer = setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(focusTimer);
   }, [conversationId]);
 
   // Allow Esc key to quickly cancel replying or editing
@@ -232,9 +310,87 @@ export function ConversationView({
     }
   }, [messages.length, me, memberMap, fetchSmartReplies]);
 
+  const availableMembers = useMemo(() => {
+    const list = [];
+    const seen = new Set();
+    (members || []).forEach(m => {
+      const mId = String(m._id || m.id || "");
+      if (mId && mId !== me && !seen.has(mId)) {
+        seen.add(mId);
+        list.push(m);
+      }
+    });
+    return list;
+  }, [members, me]);
+
+  const filteredMentionCandidates = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const query = (mentionQuery || "").toLowerCase();
+    const results = [];
+
+    if (isGroup && ("everyone".includes(query) || query === "")) {
+      results.push({
+        _id: "everyone",
+        id: "everyone",
+        name: "everyone",
+        username: "everyone",
+        isEveryone: true
+      });
+    }
+
+    availableMembers.forEach(m => {
+      const name = (m.name || m.display_name || "").toLowerCase();
+      const username = (m.username || "").toLowerCase();
+      if (!query || name.includes(query) || username.includes(query)) {
+        results.push(m);
+      }
+    });
+
+    return results.slice(0, 8);
+  }, [mentionQuery, isGroup, availableMembers]);
+
+  const handleSelectMention = useCallback((candidate) => {
+    if (!candidate) return;
+    const isEveryone = Boolean(candidate.isEveryone);
+    const tagText = isEveryone ? "@everyone " : `@${candidate.name || candidate.username || "User"} `;
+    
+    const beforeAt = text.slice(0, mentionPosition);
+    const afterCursor = text.slice(mentionPosition + 1 + (mentionQuery || "").length);
+    const newText = `${beforeAt}${tagText}${afterCursor}`;
+    
+    setText(newText);
+    setMentionQuery(null);
+    setMentionIndex(0);
+
+    if (!isEveryone && candidate._id && candidate._id !== "everyone") {
+      setTrackedMentions(prev => Array.from(new Set([...prev, String(candidate._id || candidate.id)])));
+    }
+
+    setTimeout(() => {
+      if (textareaRef.current) {
+        textareaRef.current.focus();
+        const newCursorPos = beforeAt.length + tagText.length;
+        textareaRef.current.setSelectionRange(newCursorPos, newCursorPos);
+      }
+    }, 10);
+  }, [text, mentionPosition, mentionQuery]);
+
   const handleTextChange = (e) => {
     const val = e.target.value;
+    const cursorPos = e.target.selectionStart;
     setText(val);
+
+    // Detect mention trigger '@' immediately before cursor
+    const textBeforeCursor = val.slice(0, cursorPos);
+    const mentionMatch = textBeforeCursor.match(/@([a-zA-Z0-9_]*)$/);
+
+    if (mentionMatch) {
+      setMentionQuery(mentionMatch[1]);
+      setMentionPosition(mentionMatch.index);
+      setMentionIndex(0);
+    } else {
+      setMentionQuery(null);
+    }
 
     if (onTypingChange) {
       onTypingChange(true);
@@ -249,18 +405,35 @@ export function ConversationView({
     const body = override?.body ?? text.trim();
     if (!body && !override?.attachment_url) return;
 
+    // Resolve mentions: explicit trackedMentions + scanning members matching @name
+    const resolvedMentions = new Set(override?.mentions || trackedMentions);
+    availableMembers.forEach(m => {
+      const mId = String(m._id || m.id || "");
+      if (mId && mId !== me) {
+        const mName = (m.name || m.display_name || "").toLowerCase();
+        const mUsername = (m.username || "").toLowerCase();
+        if ((mName && body.toLowerCase().includes(`@${mName}`)) ||
+            (mUsername && body.toLowerCase().includes(`@${mUsername}`))) {
+          resolvedMentions.add(mId);
+        }
+      }
+    });
+
     if (onSendMessage) {
       setSending(true);
       await onSendMessage(body, { 
         ...override, 
         replyTo: replyingTo?._id || replyingTo?.id, 
-        editId: editingMessage?._id || editingMessage?.id 
+        editId: editingMessage?._id || editingMessage?.id,
+        mentions: Array.from(resolvedMentions)
       });
       setSending(false);
       setText("");
       setReplyingTo(null);
       setEditingMessage(null);
       setSmartReplies([]); // clear suggestions once sent
+      setMentionQuery(null);
+      setTrackedMentions([]);
     }
   };
 
@@ -382,6 +555,15 @@ export function ConversationView({
 
   const grouped = useMemo(() => groupByDay(messages), [messages]);
 
+  const messagesMap = useMemo(() => {
+    const map = new Map();
+    (messages || []).forEach(m => {
+      if (m._id) map.set(String(m._id), m);
+      if (m.id) map.set(String(m.id), m);
+    });
+    return map;
+  }, [messages]);
+
   return (
     <div className="flex h-full flex-col bg-background overflow-hidden relative">
       {/* Header */}
@@ -450,16 +632,6 @@ export function ConversationView({
 
         {/* Header Right Actions */}
         <div className="flex items-center gap-1.5">
-          {/* End-to-End Encryption Badge */}
-          <button
-            onClick={() => setSecurityModalOpen(true)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-semibold transition-all shadow-2xs active:scale-95"
-            title="View End-to-End Encryption Security Status"
-          >
-            <ShieldCheck className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Encrypted</span>
-          </button>
-
           {messages.length > 2 && (
             <button
               onClick={handleOpenSummary}
@@ -471,7 +643,7 @@ export function ConversationView({
             </button>
           )}
 
-          {/* More options menu (Delete conversation, Exit group) */}
+          {/* More options menu (Group info, Encrypted, Create Poll, Delete, Exit) */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
@@ -481,66 +653,89 @@ export function ConversationView({
                 <MoreVertical className="h-4 w-4" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuContent align="end" className="w-52">
               {isGroup ? (
                 <>
                   <DropdownMenuItem
                     onClick={() => setGroupDetailsModalOpen(true)}
                     className="cursor-pointer font-medium"
                   >
-                    <Users className="h-4 w-4 mr-2 text-primary" />
+                    <Users className="h-4 w-4 mr-2.5 text-primary" />
                     Group Info
                   </DropdownMenuItem>
-                  <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => setPollModalOpen(true)}
                     className="cursor-pointer font-medium"
                   >
-                    <BarChart2 className="h-4 w-4 mr-2 text-primary" />
+                    <BarChart2 className="h-4 w-4 mr-2.5 text-sky-500" />
                     Create Poll
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setSecurityModalOpen(true)}
+                    className="cursor-pointer font-medium"
+                  >
+                    <ShieldCheck className="h-4 w-4 mr-2.5 text-emerald-500" />
+                    Encrypted
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => setExitDialogOpen(true)}
                     className="text-amber-600 dark:text-amber-400 focus:text-amber-600 focus:bg-amber-500/10 cursor-pointer"
                   >
-                    <LogOut className="h-4 w-4 mr-2" />
+                    <LogOut className="h-4 w-4 mr-2.5" />
                     Exit Group
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => setDeleteDialogOpen(true)}
                     variant="destructive"
-                    className="cursor-pointer"
+                    className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
                   >
-                    <Trash2 className="h-4 w-4 mr-2" />
+                    <Trash2 className="h-4 w-4 mr-2.5" />
                     Delete Group
                   </DropdownMenuItem>
                 </>
               ) : isAIConversation ? (
-                <DropdownMenuItem
-                  onClick={() => setDeleteDialogOpen(true)}
-                  className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  Clear AI History
-                </DropdownMenuItem>
+                <>
+                  <DropdownMenuItem
+                    onClick={() => setSecurityModalOpen(true)}
+                    className="cursor-pointer font-medium"
+                  >
+                    <ShieldCheck className="h-4 w-4 mr-2.5 text-emerald-500" />
+                    Encrypted
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => setDeleteDialogOpen(true)}
+                    className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2.5" />
+                    Clear AI History
+                  </DropdownMenuItem>
+                </>
               ) : (
                 <>
                   <DropdownMenuItem
                     onClick={() => setPollModalOpen(true)}
                     className="cursor-pointer font-medium"
                   >
-                    <BarChart2 className="h-4 w-4 mr-2 text-primary" />
+                    <BarChart2 className="h-4 w-4 mr-2.5 text-sky-500" />
                     Create Poll
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => setSecurityModalOpen(true)}
+                    className="cursor-pointer font-medium"
+                  >
+                    <ShieldCheck className="h-4 w-4 mr-2.5 text-emerald-500" />
+                    Encrypted
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     onClick={() => setDeleteDialogOpen(true)}
                     variant="destructive"
-                    className="cursor-pointer"
+                    className="cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/10"
                   >
-                    <Trash2 className="h-4 w-4 mr-2" />
+                    <Trash2 className="h-4 w-4 mr-2.5" />
                     Delete Conversation
                   </DropdownMenuItem>
                 </>
@@ -691,6 +886,8 @@ export function ConversationView({
                     onAIReply={handleAIReplyToMessage}
                     isAILoading={aiActionLoadingId === (msg.id || msg._id)}
                     memberMap={memberMap}
+                    currentUser={currentUser}
+                    messagesMap={messagesMap}
                   />
                 );
               })}
@@ -754,7 +951,7 @@ export function ConversationView({
                 </span>
               </div>
               <div className="text-xs text-muted-foreground truncate block max-w-full">
-                {replyingTo.message || replyingTo.body}
+                {cleanMessageText(replyingTo.poll?.question ? `📊 Poll: ${replyingTo.poll.question}` : (replyingTo.message || replyingTo.body))}
               </div>
             </div>
           </div>
@@ -796,7 +993,80 @@ export function ConversationView({
       )}
 
       {/* Composer */}
-      <div className="border-t border-border bg-card px-3 sm:px-4 py-2.5 sm:py-3 pb-[max(0.65rem,env(safe-area-inset-bottom))]">
+      <div className="border-t border-border bg-card px-3 sm:px-4 py-2.5 sm:py-3 pb-[max(0.65rem,env(safe-area-inset-bottom))] relative">
+        {/* Mention Suggestions Popover */}
+        {mentionQuery !== null && filteredMentionCandidates.length > 0 && (
+          <div className="absolute bottom-full mb-2 left-3 sm:left-4 z-40 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-border/80 bg-popover/95 dark:bg-popover/90 backdrop-blur-md shadow-xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70 border-b border-border/50 flex items-center justify-between bg-muted/40">
+              <span className="flex items-center gap-1.5">
+                <AtSign className="h-3 w-3 text-primary" />
+                <span>Mention</span>
+              </span>
+              <span className="text-[9px] font-normal opacity-80">↑↓ to navigate, Enter to select</span>
+            </div>
+            <div className="max-h-56 overflow-y-auto py-1 scrollbar-thin">
+              {filteredMentionCandidates.map((candidate, idx) => {
+                const isSelected = idx === mentionIndex;
+                const isEveryone = candidate.isEveryone;
+                const isOnline = Boolean(presence?.has(String(candidate._id || candidate.id || "")));
+
+                return (
+                  <div
+                    key={candidate._id || candidate.id || idx}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      handleSelectMention(candidate);
+                    }}
+                    onMouseEnter={() => setMentionIndex(idx)}
+                    className={`px-3 py-2 flex items-center gap-2.5 cursor-pointer transition-colors ${
+                      isSelected
+                        ? "bg-primary/10 text-primary font-medium"
+                        : "hover:bg-muted/60 text-foreground"
+                    }`}
+                  >
+                    {isEveryone ? (
+                      <div className="h-7 w-7 rounded-full bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0 text-amber-500">
+                        <Users className="h-3.5 w-3.5" />
+                      </div>
+                    ) : (
+                      <div className="relative shrink-0">
+                        <UserAvatar
+                          src={candidate.avatar_url || candidate.profile}
+                          name={candidate.name || candidate.display_name || "User"}
+                          size="xs"
+                        />
+                        {isOnline && (
+                          <span className="absolute -bottom-0.5 -right-0.5 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-background" />
+                        )}
+                      </div>
+                    )}
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs truncate font-medium">
+                          {isEveryone ? "everyone" : (candidate.name || candidate.display_name || "User")}
+                        </span>
+                        {isEveryone && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 font-semibold border border-amber-500/25">
+                            Group
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground truncate block">
+                        {isEveryone
+                          ? "Notify all members in this group"
+                          : candidate.username
+                          ? `@${candidate.username}`
+                          : "Group member"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex items-end gap-1.5 sm:gap-2">
           {/* AI Composer Magic Wand Menu */}
           <AIComposerMenu
@@ -823,28 +1093,65 @@ export function ConversationView({
             </PopoverContent>
           </Popover>
 
-          {/* Create Poll Button */}
-          <button
-            type="button"
-            onClick={() => setPollModalOpen(true)}
-            className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0 cursor-pointer"
-            title="Create a Poll"
-          >
-            <BarChart2 className="h-4 w-4" />
-          </button>
+          {/* Tag Group Member Button */}
+          {/* {isGroup && (
+            <button
+              type="button"
+              onClick={() => {
+                const newText = text + (text && !text.endsWith(" ") ? " @" : "@");
+                setText(newText);
+                setMentionQuery("");
+                setMentionPosition(newText.lastIndexOf("@"));
+                setMentionIndex(0);
+                textareaRef.current?.focus();
+              }}
+              className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0"
+              title="Tag member (@)"
+            >
+              <AtSign className="h-4 w-4" />
+            </button>
+          )} */}
 
           <textarea
             ref={textareaRef}
             value={text}
             onChange={handleTextChange}
             onKeyDown={(e) => {
+              if (mentionQuery !== null && filteredMentionCandidates.length > 0) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setMentionIndex((prev) => (prev + 1) % filteredMentionCandidates.length);
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setMentionIndex((prev) => (prev - 1 + filteredMentionCandidates.length) % filteredMentionCandidates.length);
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  handleSelectMention(filteredMentionCandidates[mentionIndex]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setMentionQuery(null);
+                  return;
+                }
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 handleSend();
               }
             }}
             rows={1}
-            placeholder={isAIConversation ? "Ask SendChat AI anything… (or type @ai in any chat)" : "Type a message… (@ai for AI help)"}
+            placeholder={
+              isGroup 
+                ? "Type a message… (@ to tag someone)" 
+                : isAIConversation 
+                ? "Ask SendChat AI anything… (or type @ai in any chat)" 
+                : "Type a message… (@ai for AI help)"
+            }
             className="max-h-32 min-h-9 flex-1 resize-none rounded-xl border border-input bg-background px-3 py-2 text-base sm:text-sm outline-none focus:ring-2 focus:ring-ring"
           />
 
@@ -943,6 +1250,7 @@ export function ConversationView({
         open={groupDetailsModalOpen}
         onOpenChange={setGroupDetailsModalOpen}
         conversation={selectedConverstion}
+        conversationId={conversationId}
       />
 
       {/* Create Poll Modal */}
@@ -983,14 +1291,107 @@ export function ConversationView({
 
 const MessageItem = memo(function MessageItem({
   msg, mine, isAI, sender, showHeader, reactions, onReact, onDelete, onEdit, onReply, onForward, onReplyClick, isHighlighted, meId, presence = new Set(),
-  translatedText, showOriginal, onToggleOriginal, explanationText, onTranslate, onExplain, onAIReply, isAILoading, memberMap
+  translatedText, showOriginal, onToggleOriginal, explanationText, onTranslate, onExplain, onAIReply, isAILoading, memberMap, currentUser, messagesMap
 }) {
   const grouped = {};
   (reactions || []).forEach((r) => { if (r && r.emoji) { (grouped[r.emoji] ??= []).push(r); } });
 
-  const rawText = msg.message || msg.body;
-  const displayText = translatedText && !showOriginal ? translatedText : rawText;
+  const rawText = msg.message || msg.body || "";
+  const pollData = isValidPoll(msg.poll) ? msg.poll : getCachedPoll(msg);
+  const isPoll = Boolean(isValidPoll(pollData));
   const msgId = msg.id || msg._id;
+
+  const repliedMsg = useMemo(() => {
+    if (!msg.replyTo) return null;
+    if (typeof msg.replyTo === "object" && (msg.replyTo.message || msg.replyTo.body || msg.replyTo.poll)) {
+      return msg.replyTo;
+    }
+    const rId = String(msg.replyTo?._id || msg.replyTo?.id || msg.replyTo);
+    if (messagesMap && messagesMap.has(rId)) {
+      return messagesMap.get(rId);
+    }
+    return typeof msg.replyTo === "object" ? msg.replyTo : null;
+  }, [msg.replyTo, messagesMap]);
+
+  const repliedSenderId = String(repliedMsg?.senderId || repliedMsg?.sender_id || repliedMsg?.sender || "");
+  const repliedSenderName = repliedMsg?.isAI
+    ? "SendChat AI ✨"
+    : memberMap?.get(repliedSenderId)?.name || memberMap?.get(repliedSenderId)?.display_name || (repliedSenderId === meId ? "You" : "Message");
+
+  const repliedRawText = repliedMsg?.poll?.question 
+    ? `📊 Poll: ${repliedMsg.poll.question}` 
+    : (repliedMsg?.message || repliedMsg?.body || "");
+  const repliedDisplayText = cleanMessageText(repliedRawText);
+
+  // WhatsApp-style system event check (group announcements)
+  const isSystemMessage = Boolean(
+    msg.isSystem ||
+    msg.type === "system" ||
+    (typeof rawText === "string" && (
+      (rawText.includes(" added ") && rawText.includes(" to the group")) ||
+      rawText.includes(" left the group") ||
+      (rawText.includes(" removed ") && rawText.includes(" from the group")) ||
+      rawText.includes(" created the group") ||
+      rawText.includes(" cleared the chat")
+    ))
+  );
+
+  if (isSystemMessage) {
+    let systemText = cleanMessageText(rawText);
+    const myName = currentUser?.name || currentUser?.username;
+    if (myName) {
+      if (systemText.startsWith(`${myName} left the group`)) {
+        systemText = "You left the group";
+      } else if (systemText.startsWith(`${myName} added `)) {
+        systemText = systemText.replace(`${myName} added `, "You added ");
+      } else if (systemText.includes(` removed ${myName} from the group`)) {
+        systemText = systemText.replace(` removed ${myName} from the group`, " removed you from the group");
+      } else if (systemText.startsWith(`${myName} removed `)) {
+        systemText = systemText.replace(`${myName} removed `, "You removed ");
+      }
+    }
+
+    return (
+      <div id={`msg-${msgId}`} className="flex justify-center my-2.5 sm:my-3 select-none px-4">
+        <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-muted/80 dark:bg-muted/40 border border-border/40 text-[11px] font-medium text-muted-foreground shadow-2xs text-center max-w-[85%] break-words">
+          <span>{systemText}</span>
+          <span className="text-[9px] opacity-60 ml-0.5 font-normal">
+            {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </span>
+        </div>
+      </div>
+    );
+  }
+
+  // WhatsApp-style deleted message
+  if (msg.isDeleted) {
+    return (
+      <div id={`msg-${msgId}`} className={"group mb-2 pt-1 flex gap-3 transition-all relative " + (mine ? "justify-end" : "justify-start")}>
+        <div className={"max-w-[75%] sm:max-w-[65%]"}>
+          <div className={
+            "rounded-2xl px-3.5 py-2 text-xs italic shadow-2xs border flex items-center gap-2 select-none " +
+            (mine
+              ? "bg-muted/40 dark:bg-muted/20 border-border/50 text-muted-foreground/80 rounded-br-sm"
+              : "bg-muted/50 dark:bg-muted/30 border-border/50 text-muted-foreground/80 rounded-bl-sm")
+          }>
+            <CircleSlash2 className="h-3.5 w-3.5 shrink-0 opacity-70 text-muted-foreground" />
+            <span>{mine ? "You deleted this message" : "This message was deleted"}</span>
+            <span className="text-[9px] opacity-50 not-italic ml-1 font-sans">
+              {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const displayText = cleanMessageText(translatedText && !showOriginal ? translatedText : rawText);
+  const isMeMentioned = !mine && (
+    (Array.isArray(msg.mentions) && msg.mentions.some(id => String(id) === String(meId))) ||
+    displayText.toLowerCase().includes("@everyone") ||
+    (currentUser?.name && displayText.toLowerCase().includes(`@${currentUser.name.toLowerCase()}`)) ||
+    (currentUser?.username && displayText.toLowerCase().includes(`@${currentUser.username.toLowerCase()}`))
+  );
 
   return (
     <div id={`msg-${msgId}`} className={"group mb-2.5 sm:mb-3 pt-1 flex gap-3 transition-all duration-300 relative " + (mine ? "justify-end " : "justify-start ") + (isHighlighted ? "bg-primary/10 ring-2 ring-primary/20 rounded-lg scale-[1.02] py-2 px-1" : "")}>
@@ -1017,21 +1418,49 @@ const MessageItem = memo(function MessageItem({
           )}
         </div>
       )}
-      <div className={"max-w-[70%] " + (mine ? "items-end" : "items-start")}>
+      <div className={"max-w-[80%] sm:max-w-[70%] " + (mine ? "items-end" : "items-start")}>
         <div className="relative">
           <div
             className={
-              "rounded-2xl px-3.5 py-2 text-sm shadow-2xs " +
-              (mine
-                ? "bg-bubble-mine text-bubble-mine-foreground rounded-br-md"
-                : isAI
-                ? "bg-card border border-primary/20 text-foreground rounded-bl-md shadow-xs"
-                : "bg-bubble-theirs text-bubble-theirs-foreground rounded-bl-md")
+              isPoll
+                ? "rounded-2xl shadow-md border overflow-hidden " +
+                  (mine
+                    ? "bg-card/95 border-sky-500/30 dark:border-sky-500/20 rounded-br-sm ring-1 ring-sky-500/10"
+                    : "bg-card/95 border-border/80 rounded-bl-sm")
+                : "rounded-2xl px-3.5 py-2 text-sm shadow-2xs transition-all " +
+                  (isMeMentioned ? "ring-2 ring-amber-500/50 shadow-md shadow-amber-500/10 " : "") +
+                  (mine
+                    ? "bg-bubble-mine text-bubble-mine-foreground rounded-br-md"
+                    : isAI
+                    ? "bg-card border border-primary/20 text-foreground rounded-bl-md shadow-xs"
+                    : "bg-bubble-theirs text-bubble-theirs-foreground rounded-bl-md")
             }
           >
-            {msg.isDeleted ? (
-              <div className="italic opacity-60 text-xs py-1">
-                This message was deleted by its author
+            {isPoll ? (
+              <div className="relative">
+                {repliedMsg && (
+                  <div 
+                    onClick={() => onReplyClick && onReplyClick(repliedMsg._id || repliedMsg.id || msg.replyTo?._id || msg.replyTo)}
+                    className="mx-3 mt-3 mb-1 cursor-pointer border-l-2 border-primary/50 bg-muted/60 px-2.5 py-1.5 rounded-lg hover:bg-muted text-muted-foreground transition-colors"
+                  >
+                    <div className="text-[10px] font-bold text-primary flex items-center gap-1">
+                      <Reply className="h-2.5 w-2.5" />
+                      Replying to {repliedSenderName}
+                    </div>
+                    <div className="text-xs truncate italic">
+                      {repliedDisplayText || "Original message"}
+                    </div>
+                  </div>
+                )}
+                <PollCard msg={{ ...msg, poll: pollData }} meId={meId} />
+                <div className="flex justify-end items-center gap-1 pb-2.5 pr-3.5 -mt-1 select-none">
+                  <span className="text-[10px] text-muted-foreground font-medium shrink-0">
+                    {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                  {mine && (
+                    <CheckCheck className="h-3 w-3 text-sky-500 opacity-80 shrink-0" />
+                  )}
+                </div>
               </div>
             ) : (
               <>
@@ -1043,13 +1472,16 @@ const MessageItem = memo(function MessageItem({
                   </div>
                 )}
 
-                {msg.replyTo && (
+                {repliedMsg && (
                   <div 
-                    onClick={() => onReplyClick && onReplyClick(msg.replyTo._id || msg.replyTo.id)}
-                    className={"mb-2 cursor-pointer border-l-2 border-primary/40 bg-black/5 px-2 py-1 rounded hover:bg-black/10 transition-colors " + (mine ? "text-bubble-mine-foreground/80" : "text-bubble-theirs-foreground/80")}
+                    onClick={() => onReplyClick && onReplyClick(repliedMsg._id || repliedMsg.id || msg.replyTo?._id || msg.replyTo)}
+                    className={"mb-2 cursor-pointer border-l-2 border-primary/40 bg-black/5 dark:bg-white/5 px-2.5 py-1.5 rounded-lg hover:bg-black/10 transition-colors " + (mine ? "text-bubble-mine-foreground/90" : "text-bubble-theirs-foreground/90")}
                   >
-                    <div className="text-[10px] font-bold">Replying to...</div>
-                    <div className="text-xs truncate italic">{msg.replyTo.message || msg.replyTo.body}</div>
+                    <div className="text-[10px] font-bold text-primary flex items-center gap-1">
+                      <Reply className="h-2.5 w-2.5" />
+                      Replying to {repliedSenderName}
+                    </div>
+                    <div className="text-xs truncate italic">{repliedDisplayText || "Original message"}</div>
                   </div>
                 )}
 
@@ -1067,36 +1499,28 @@ const MessageItem = memo(function MessageItem({
                   </div>
                 )}
 
-                {msg.poll ? (
-                  <div className="relative pb-1">
-                    <PollCard msg={msg} meId={meId} />
-                    <div className="flex justify-end items-center gap-1 mt-1 pr-1 select-none">
-                      <span className="text-[9px] opacity-50 font-medium shrink-0">
-                        {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      {mine && (
-                        <CheckCheck className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                      )}
+                <div className="relative pb-2">
+                  {isMeMentioned && (
+                    <div className="inline-flex items-center gap-1 mb-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 select-none shadow-2xs">
+                      <AtSign className="h-2.5 w-2.5" />
+                      <span>You were tagged</span>
                     </div>
+                  )}
+                  <div className="whitespace-pre-wrap break-words pr-20 leading-relaxed min-w-[90px]">
+                    {renderFormattedMessage(displayText, currentUser, mine)}
                   </div>
-                ) : (
-                  <div className="relative pb-2">
-                    <div className="whitespace-pre-wrap break-words pr-20 leading-relaxed min-w-[90px]">
-                      {displayText}
-                    </div>
-                    <div className="absolute bottom-0 right-0 flex items-center gap-1 pb-0.5 pr-1.5 select-none">
-                      {msg.isEdited && (
-                        <span className="text-[9px] opacity-50 italic shrink-0">edited</span>
-                      )}
-                      <span className="text-[9px] opacity-50 font-medium shrink-0">
-                        {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                      {mine && (
-                        <CheckCheck className="h-2.5 w-2.5 opacity-50 shrink-0" />
-                      )}
-                    </div>
+                  <div className="absolute bottom-0 right-0 flex items-center gap-1 pb-0.5 pr-1.5 select-none">
+                    {msg.isEdited && (
+                      <span className="text-[9px] opacity-50 italic shrink-0">edited</span>
+                    )}
+                    <span className="text-[9px] opacity-50 font-medium shrink-0">
+                      {new Date(msg.created_at || msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    {mine && (
+                      <CheckCheck className="h-2.5 w-2.5 opacity-50 shrink-0" />
+                    )}
                   </div>
-                )}
+                </div>
 
                 {/* AI Explanation Box */}
                 {explanationText && (

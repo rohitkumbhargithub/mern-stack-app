@@ -1,6 +1,7 @@
 import { useState } from "react";
 import useConverstion from "../zustand/useConverstion";
 import { toast } from "sonner";
+import { saveCachedPoll, cleanMessageText } from "../utils/pollCache";
 
 // Tracks IDs of messages sent from this client session so incoming socket echo never triggers sound
 export const locallySentMessageIds = new Set();
@@ -36,7 +37,8 @@ const userSendMessage = () => {
                     replyTo: options.replyTo,
                     editId: options.editId,
                     isForwarded: options.isForwarded || false,
-                    poll: options.poll || undefined
+                    poll: options.poll || undefined,
+                    mentions: options.mentions || undefined
                 })
             });
 
@@ -50,17 +52,26 @@ const userSendMessage = () => {
                 locallySentMessageIds.add(String(data._id));
             }
 
+            if (options.poll) {
+                saveCachedPoll(data._id, options.poll);
+            }
+
+            const messageToStore = {
+                ...data,
+                poll: data.poll || options.poll || undefined
+            };
+
             if (String(targetConvId) === String(selectedConverstion?._id)) {
                 if (options.editId) {
-                    setMessages(messages.map(m => (m._id || m.id) === data._id ? data : m));
+                    setMessages(messages.map(m => (m._id || m.id) === data._id ? messageToStore : m));
                 } else {
-                    setMessages([...messages, data]);
+                    setMessages([...messages, messageToStore]);
                 }
             }
 
             if (updateConversation) {
                 updateConversation(targetConvId, {
-                    lastMessage: finalMessage,
+                    lastMessage: cleanMessageText(finalMessage),
                     lastMessageTime: new Date().toISOString()
                 });
             }
