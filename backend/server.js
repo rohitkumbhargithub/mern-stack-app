@@ -34,6 +34,30 @@ app.use('/api/users', userRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/push', pushRoutes);
 
+// API 404 guard: Ensures any unknown or unhandled /api route returns JSON, never HTML
+app.all('/api/*', (req, res) => {
+    res.status(404).json({
+        error: `API route '${req.method} ${req.originalUrl}' not found. Please restart the backend server if new routes were recently added.`
+    });
+});
+
+// Centralized API error handler (catches Multer, JWT, and uncaught errors in /api routes)
+app.use('/api', (err, req, res, next) => {
+    console.error('API Error:', err);
+    if (err.name === 'MulterError') {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: "File exceeds the 25MB limit." });
+        }
+        if (err.code === 'LIMIT_FILE_COUNT') {
+            return res.status(400).json({ error: "Maximum 5 files per message." });
+        }
+        return res.status(400).json({ error: `Upload error: ${err.message}` });
+    }
+    return res.status(err.status || 500).json({
+        error: err.message || "Internal server error"
+    });
+});
+
 app.use(express.static(path.join(__variableOfChoice, "/frontend/dist")));
 
 app.get("*", (req, res) => {

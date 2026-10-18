@@ -31,18 +31,123 @@ import { ForwardMessageModal } from "./ForwardMessageModal";
 import { GroupDetailsModal } from "./GroupDetailsModal";
 import { CreatePollModal } from "./CreatePollModal";
 import { PollCard } from "./PollCard";
+import { LinkPreviewCard, extractUrls } from "./LinkPreviewCard";
+import { MessageAttachments } from "./MessageAttachments";
+import { VoiceRecorder } from "./VoiceRecorder";
 import { getCachedPoll, formatPollMessage, cleanMessageText, isValidPoll } from "../../utils/pollCache";
+import api from "../../lib/api";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉", "🔥", "✅"];
+
+/**
+ * Format WhatsApp & Markdown styles:
+ * - *bold* and **bold** -> <strong>
+ * - _italic_ -> <em>
+ * - ~strike~ and ~~strike~~ -> <del>
+ * - `code` -> <code>
+ * - ```code block``` -> <pre><code>
+ */
+function formatWhatsAppInline(text, keyPrefix = "fmt") {
+  if (!text || typeof text !== "string") return text;
+
+  // Multi-line code block: ```code```
+  if (text.includes("```")) {
+    const codeBlockRegex = /(```[\s\S]*?```)/g;
+    const blocks = text.split(codeBlockRegex);
+    return blocks.map((block, bIdx) => {
+      if (!block) return null;
+      if (block.startsWith("```") && block.endsWith("```") && block.length >= 6) {
+        const codeContent = block.slice(3, -3).replace(/^\n/, "");
+        return (
+          <pre
+            key={`${keyPrefix}-cb-${bIdx}`}
+            className="font-mono text-xs bg-black/25 dark:bg-black/50 text-foreground p-2.5 my-1.5 rounded-lg border border-border/40 overflow-x-auto whitespace-pre select-text"
+          >
+            <code>{codeContent}</code>
+          </pre>
+        );
+      }
+      return formatWhatsAppInlineSimple(block, `${keyPrefix}-b-${bIdx}`);
+    });
+  }
+
+  return formatWhatsAppInlineSimple(text, keyPrefix);
+}
+
+function formatWhatsAppInlineSimple(text, keyPrefix) {
+  if (!text || typeof text !== "string") return text;
+
+  const inlineTokenRegex = /(`[^`\n]+`|\*\*[^*\n]+?\*\*|(?<=^|[\s.,!?;:()\[\]{}"''])\*(?!\s)[^*\n]+?(?<!\s)\*(?=$|[\s.,!?;:()\[\]{}"''])|~~[^~\n]+?~~|(?<=^|[\s.,!?;:()\[\]{}"''])~(?!\s)[^~\n]+?(?<!\s)~(?=$|[\s.,!?;:()\[\]{}"''])|(?<=^|[\s.,!?;:()\[\]{}"''])_(?!\s)[^_\n]+?(?<!\s)_(?=$|[\s.,!?;:()\[\]{}"'']))/g;
+
+  const parts = text.split(inlineTokenRegex);
+  if (parts.length <= 1) return text;
+
+  return parts.map((part, i) => {
+    if (!part) return null;
+    const key = `${keyPrefix}-${i}`;
+
+    // Inline Code: `code`
+    if (part.startsWith("`") && part.endsWith("`") && part.length >= 2) {
+      return (
+        <code
+          key={key}
+          className="font-mono text-[0.88em] bg-black/15 dark:bg-white/15 px-1.5 py-0.5 rounded border border-black/10 dark:border-white/10"
+        >
+          {part.slice(1, -1)}
+        </code>
+      );
+    }
+
+    // Markdown Bold: **bold**
+    if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+      return (
+        <strong key={key} className="font-bold tracking-tight">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+
+    // WhatsApp Bold: *bold*
+    if (part.startsWith("*") && part.endsWith("*") && part.length >= 2) {
+      return (
+        <strong key={key} className="font-bold tracking-tight">
+          {part.slice(1, -1)}
+        </strong>
+      );
+    }
+
+    // Strikethrough: ~~strike~~ or ~strike~
+    if (
+      (part.startsWith("~~") && part.endsWith("~~") && part.length >= 4) ||
+      (part.startsWith("~") && part.endsWith("~") && part.length >= 2)
+    ) {
+      const inner = part.startsWith("~~") ? part.slice(2, -2) : part.slice(1, -1);
+      return (
+        <del key={key} className="line-through opacity-80">
+          {inner}
+        </del>
+      );
+    }
+
+    // Italic: _italic_
+    if (part.startsWith("_") && part.endsWith("_") && part.length >= 2) {
+      return (
+        <em key={key} className="italic">
+          {part.slice(1, -1)}
+        </em>
+      );
+    }
+
+    return <span key={key}>{part}</span>;
+  });
+}
 
 function renderFormattedMessage(text, currentUser, mine) {
   if (!text || typeof text !== "string") return text;
 
-  // Split text by mentions (@everyone or @name)
-  const mentionRegex = /(@everyone|@[a-zA-Z0-9_]+(?:\s[a-zA-Z0-9_]+)?)/g;
-  const parts = text.split(mentionRegex);
-
-  if (parts.length <= 1) return text;
+  // Split text by mentions (@everyone or @name) AND URLs (https?://...)
+  const tokenRegex = /(@everyone|@[a-zA-Z0-9_]+(?:\s[a-zA-Z0-9_]+)?|https?:\/\/[^\s<>"']+)/g;
+  const parts = text.split(tokenRegex);
 
   const myName = (currentUser?.name || "").toLowerCase();
   const myUsername = (currentUser?.username || "").toLowerCase();
@@ -50,6 +155,32 @@ function renderFormattedMessage(text, currentUser, mine) {
   return parts.map((part, index) => {
     if (!part) return null;
 
+    // Clickable Hyperlink
+    if (part.startsWith("http://") || part.startsWith("https://")) {
+      const cleanUrl = part.replace(/[.,!?;:)]+$/, "");
+      const trailing = part.slice(cleanUrl.length);
+      return (
+        <span key={`link-${index}`}>
+          <a
+            href={cleanUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className={
+              "underline underline-offset-2 break-all transition-colors font-medium " +
+              (mine
+                ? "text-bubble-mine-foreground hover:opacity-85"
+                : "text-sky-500 hover:text-sky-400 dark:text-sky-400 dark:hover:text-sky-300")
+            }
+          >
+            {cleanUrl}
+          </a>
+          {trailing}
+        </span>
+      );
+    }
+
+    // Mention Badge: @everyone or @user
     if (part.startsWith("@")) {
       const lower = part.toLowerCase();
       const isEveryone = lower === "@everyone";
@@ -61,7 +192,7 @@ function renderFormattedMessage(text, currentUser, mine) {
       if (isEveryone) {
         return (
           <span
-            key={index}
+            key={`mention-${index}`}
             className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md font-semibold text-xs bg-amber-500/20 text-amber-600 dark:text-amber-400 border border-amber-500/30 shadow-2xs select-none"
           >
             {part}
@@ -72,7 +203,7 @@ function renderFormattedMessage(text, currentUser, mine) {
       if (isMe) {
         return (
           <span
-            key={index}
+            key={`mention-${index}`}
             className="inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md font-semibold text-xs bg-amber-500/25 text-amber-700 dark:text-amber-300 border border-amber-500/40 shadow-2xs select-none"
           >
             {part}
@@ -82,7 +213,7 @@ function renderFormattedMessage(text, currentUser, mine) {
 
       return (
         <span
-          key={index}
+          key={`mention-${index}`}
           className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 mx-0.5 rounded-md font-medium text-xs select-none ${
             mine
               ? "bg-white/20 text-white border border-white/30"
@@ -94,7 +225,12 @@ function renderFormattedMessage(text, currentUser, mine) {
       );
     }
 
-    return <span key={index}>{part}</span>;
+    // Format WhatsApp / Markdown formatting (bold, italic, strike, code) on regular text
+    return (
+      <span key={`text-${index}`}>
+        {formatWhatsAppInline(part, `txt-${index}`)}
+      </span>
+    );
   });
 }
 
@@ -125,6 +261,7 @@ export function ConversationView({
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState([]);
   const fileInputRef = useRef(null);
   const scrollerRef = useRef(null);
   const textareaRef = useRef(null);
@@ -401,9 +538,126 @@ export function ConversationView({
     }
   };
 
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    if (pendingFiles.length + files.length > 5) {
+      toast.error("You can attach up to 5 files per message.");
+      return;
+    }
+
+    const newPending = [];
+    for (const file of files) {
+      if (file.size > 25 * 1024 * 1024) {
+        toast.error(`"${file.name}" exceeds the 25MB limit.`);
+        continue;
+      }
+      const isImg = file.type.startsWith("image/");
+      newPending.push({
+        file,
+        previewUrl: isImg ? URL.createObjectURL(file) : null,
+        name: file.name,
+        size: file.size,
+        type: isImg ? "image" : file.type === "application/pdf" ? "pdf" : "document",
+      });
+    }
+
+    setPendingFiles((prev) => [...prev, ...newPending]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleRemovePendingFile = (indexToRemove) => {
+    setPendingFiles((prev) => {
+      const target = prev[indexToRemove];
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((_, idx) => idx !== indexToRemove);
+    });
+  };
+
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const files = [];
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].kind === "file") {
+        const file = items[i].getAsFile();
+        if (file) files.push(file);
+      }
+    }
+
+    if (files.length > 0) {
+      if (pendingFiles.length + files.length > 5) {
+        toast.error("Maximum 5 attachments per message.");
+        return;
+      }
+      const newPending = files.map((file) => {
+        const isImg = file.type.startsWith("image/");
+        return {
+          file,
+          previewUrl: isImg ? URL.createObjectURL(file) : null,
+          name: file.name || `pasted_image_${Date.now()}.png`,
+          size: file.size,
+          type: isImg ? "image" : "document",
+        };
+      });
+      setPendingFiles((prev) => [...prev, ...newPending]);
+      toast.info(`Attached ${files.length} file(s) from clipboard`);
+    }
+  };
+
+  const handleSendVoice = async (voiceAttachment) => {
+    if (!onSendMessage || !voiceAttachment) return;
+    try {
+      setSending(true);
+      await onSendMessage("", {
+        attachments: [voiceAttachment],
+        replyTo: replyingTo?._id || replyingTo?.id,
+      });
+    } catch (err) {
+      console.error("Send voice note failed:", err);
+      toast.error("Failed to send voice note");
+    } finally {
+      setSending(false);
+      setReplyingTo(null);
+    }
+  };
+
   const handleSend = async (override) => {
     const body = override?.body ?? text.trim();
-    if (!body && !override?.attachment_url) return;
+    const hasAttachments = (override?.attachments && override.attachments.length > 0) || pendingFiles.length > 0;
+    if (!body && !override?.attachment_url && !hasAttachments) return;
+
+    let finalAttachments = override?.attachments || [];
+
+    if (pendingFiles.length > 0 && (!override?.attachments || override.attachments.length === 0)) {
+      try {
+        setUploading(true);
+        const formData = new FormData();
+        pendingFiles.forEach((pf) => {
+          formData.append("files", pf.file);
+        });
+
+        const uploadData = await api.post("/api/messages/upload", formData);
+        if (!uploadData || uploadData.error) {
+          throw new Error(uploadData?.error || "Upload failed");
+        }
+        finalAttachments = uploadData.attachments || [];
+      } catch (err) {
+        console.error("File upload failed:", err);
+        const msg = err.message?.includes("<!DOCTYPE")
+          ? "Upload route not found (404). Please restart the backend server (npm run server)."
+          : (err.message || "Failed to upload attachments to Cloudinary");
+        toast.error(msg);
+        setUploading(false);
+        return;
+      } finally {
+        setUploading(false);
+      }
+    }
 
     // Resolve mentions: explicit trackedMentions + scanning members matching @name
     const resolvedMentions = new Set(override?.mentions || trackedMentions);
@@ -423,12 +677,18 @@ export function ConversationView({
       setSending(true);
       await onSendMessage(body, { 
         ...override, 
+        attachments: finalAttachments.length > 0 ? finalAttachments : undefined,
         replyTo: replyingTo?._id || replyingTo?.id, 
         editId: editingMessage?._id || editingMessage?.id,
         mentions: Array.from(resolvedMentions)
       });
       setSending(false);
       setText("");
+      // Revoke preview object URLs to free memory
+      pendingFiles.forEach(pf => {
+        if (pf.previewUrl) URL.revokeObjectURL(pf.previewUrl);
+      });
+      setPendingFiles([]);
       setReplyingTo(null);
       setEditingMessage(null);
       setSmartReplies([]); // clear suggestions once sent
@@ -1067,7 +1327,71 @@ export function ConversationView({
           </div>
         )}
 
+        {/* Pending Attachments Preview Strip */}
+        {pendingFiles.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2 p-2 mb-2 rounded-xl border border-border/80 bg-muted/40 animate-in fade-in duration-150">
+            {pendingFiles.map((pf, idx) => (
+              <div 
+                key={idx} 
+                className="relative group flex items-center gap-2 pr-2 rounded-lg border border-border bg-card text-card-foreground text-xs shadow-xs overflow-hidden"
+              >
+                {pf.previewUrl ? (
+                  <img src={pf.previewUrl} alt={pf.name} className="h-10 w-10 object-cover" />
+                ) : (
+                  <div className={`grid h-10 w-10 shrink-0 place-items-center ${
+                    pf.type === 'pdf' ? 'bg-red-500/15 text-red-500' : 'bg-primary/10 text-primary'
+                  }`}>
+                    <FileText className="h-4 w-4" />
+                  </div>
+                )}
+                <div className="flex flex-col min-w-0 max-w-[120px]">
+                  <span className="truncate font-medium">{pf.name}</span>
+                  <span className="text-[10px] text-muted-foreground">
+                    {pf.size ? `${(pf.size / 1024).toFixed(0)} KB` : ""}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleRemovePendingFile(idx)}
+                  disabled={uploading}
+                  className="ml-1 p-1 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                  title="Remove attachment"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+            {uploading && (
+              <div className="flex items-center gap-1.5 text-xs text-primary font-medium pl-1">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <span>Uploading...</span>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-end gap-1.5 sm:gap-2">
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.zip"
+            onChange={handleFileSelect}
+            className="hidden"
+          />
+
+          {/* Paperclip / File Attachment Button */}
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={sending || uploading}
+            className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0 disabled:opacity-50"
+            title="Attach images, PDFs, or files"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+
           {/* AI Composer Magic Wand Menu */}
           <AIComposerMenu
             text={text}
@@ -1093,29 +1417,11 @@ export function ConversationView({
             </PopoverContent>
           </Popover>
 
-          {/* Tag Group Member Button */}
-          {/* {isGroup && (
-            <button
-              type="button"
-              onClick={() => {
-                const newText = text + (text && !text.endsWith(" ") ? " @" : "@");
-                setText(newText);
-                setMentionQuery("");
-                setMentionPosition(newText.lastIndexOf("@"));
-                setMentionIndex(0);
-                textareaRef.current?.focus();
-              }}
-              className="grid h-9 w-9 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors shrink-0"
-              title="Tag member (@)"
-            >
-              <AtSign className="h-4 w-4" />
-            </button>
-          )} */}
-
           <textarea
             ref={textareaRef}
             value={text}
             onChange={handleTextChange}
+            onPaste={handlePaste}
             onKeyDown={(e) => {
               if (mentionQuery !== null && filteredMentionCandidates.length > 0) {
                 if (e.key === "ArrowDown") {
@@ -1150,18 +1456,29 @@ export function ConversationView({
                 ? "Type a message… (@ to tag someone)" 
                 : isAIConversation 
                 ? "Ask SendChat AI anything… (or type @ai in any chat)" 
-                : "Type a message… (@ai for AI help)"
+                : "Type a message… (or paste screenshot / @ai)"
             }
             className="max-h-32 min-h-9 flex-1 resize-none rounded-xl border border-input bg-background px-3 py-2 text-base sm:text-sm outline-none focus:ring-2 focus:ring-ring"
           />
 
+          {/* Voice Recorder (Mic) */}
+          <VoiceRecorder
+            onSendVoice={handleSendVoice}
+            disabled={sending || uploading}
+          />
+
+          {/* Send Button */}
           <button
             onClick={() => handleSend()}
-            disabled={sending || (!text.trim())}
-            className="grid h-9 w-9 place-items-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            disabled={sending || uploading || (!text.trim() && pendingFiles.length === 0)}
+            className="grid h-9 w-9 place-items-center rounded-md bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors shrink-0"
             title="Send"
           >
-            <Send className="h-4 w-4" />
+            {sending || uploading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
           </button>
         </div>
       </div>
@@ -1386,6 +1703,7 @@ const MessageItem = memo(function MessageItem({
   }
 
   const displayText = cleanMessageText(translatedText && !showOriginal ? translatedText : rawText);
+  const extractedUrls = useMemo(() => extractUrls(displayText), [displayText]);
   const isMeMentioned = !mine && (
     (Array.isArray(msg.mentions) && msg.mentions.some(id => String(id) === String(meId))) ||
     displayText.toLowerCase().includes("@everyone") ||
@@ -1506,9 +1824,21 @@ const MessageItem = memo(function MessageItem({
                       <span>You were tagged</span>
                     </div>
                   )}
-                  <div className="whitespace-pre-wrap break-words pr-20 leading-relaxed min-w-[90px]">
-                    {renderFormattedMessage(displayText, currentUser, mine)}
-                  </div>
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <MessageAttachments attachments={msg.attachments} mine={mine} />
+                  )}
+                  {displayText && displayText.trim().length > 0 && (
+                    <div className="whitespace-pre-wrap break-words pr-20 leading-relaxed min-w-[90px]">
+                      {renderFormattedMessage(displayText, currentUser, mine)}
+                    </div>
+                  )}
+                  {extractedUrls.length > 0 && (
+                    <div className="mt-2.5 flex flex-col gap-2">
+                      {extractedUrls.slice(0, 2).map((url) => (
+                        <LinkPreviewCard key={url} url={url} rawText={displayText} mine={mine} />
+                      ))}
+                    </div>
+                  )}
                   <div className="absolute bottom-0 right-0 flex items-center gap-1 pb-0.5 pr-1.5 select-none">
                     {msg.isEdited && (
                       <span className="text-[9px] opacity-50 italic shrink-0">edited</span>

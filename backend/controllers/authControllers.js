@@ -3,7 +3,7 @@ const crypto = require('crypto');
 const User = require("../models/users");
 const Otp = require("../models/otp");
 const jwt = require('../utils/jwtToken');
-const { sendSignupOtpEmail } = require('../services/emailService');
+const emailService = require('../services/emailService');
 
 exports.signup = exports.requestSignupOtp = async (req, res) => {
     const { name, email, password, confirmPassword, gender } = req.body;
@@ -63,7 +63,7 @@ exports.signup = exports.requestSignupOtp = async (req, res) => {
             { upsert: true, new: true }
         );
 
-        const emailResult = await sendSignupOtpEmail({
+        const emailResult = await emailService.sendSignupOtpEmail({
             email: normalizedEmail,
             name: name,
             otp: otpCode,
@@ -217,7 +217,7 @@ exports.resendSignupOtp = async (req, res) => {
         pending.createdAt = new Date();
         await pending.save();
 
-        const emailResult = await sendSignupOtpEmail({
+        const emailResult = await emailService.sendSignupOtpEmail({
             email: normalizedEmail,
             name: pending.payload.name,
             otp: otpCode,

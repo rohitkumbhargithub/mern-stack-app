@@ -22,6 +22,21 @@ const reactionSchema = new mongoose.Schema({
     }
 }, { _id: false });
 
+const attachmentSchema = new mongoose.Schema({
+    url: { type: String, required: true },
+    publicId: { type: String },
+    type: {
+        type: String,
+        enum: ['image', 'pdf', 'document', 'audio', 'video'],
+        default: 'image'
+    },
+    name: { type: String },
+    size: { type: Number },
+    duration: { type: Number }, // audio voice note duration in seconds
+    width: { type: Number },
+    height: { type: Number },
+}, { _id: false });
+
 const messageSchema = new mongoose.Schema({
     senderId: {
         type: mongoose.Schema.ObjectId,
@@ -39,8 +54,9 @@ const messageSchema = new mongoose.Schema({
     },
     message: {
         type: String,
-        required: true
+        default: ""
     },
+    attachments: [attachmentSchema],
     isDeleted: {
         type: Boolean,
         default: false
@@ -72,6 +88,17 @@ const messageSchema = new mongoose.Schema({
     }
 }, {
     timestamps: true
+});
+
+// Ensure a message has at least text, attachments, or a poll
+messageSchema.pre('validate', function(next) {
+    const hasText = typeof this.message === 'string' && this.message.trim().length > 0;
+    const hasAttachments = Array.isArray(this.attachments) && this.attachments.length > 0;
+    const hasPoll = Boolean(this.poll && this.poll.question);
+    if (!hasText && !hasAttachments && !hasPoll) {
+        this.message = " ";
+    }
+    next();
 });
 
 // Indexes for high performance querying & sorting

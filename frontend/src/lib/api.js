@@ -79,8 +79,17 @@ export async function request(endpoint, options = {}) {
 
   // Handle other non-2xx errors
   if (!response.ok) {
-    const errorMsg = data?.error || data?.message || `Request failed with status ${response.status}`;
-    throw new ApiError(errorMsg, response.status, data);
+    let errorMsg = data?.error || data?.message;
+    if (!errorMsg && data?.rawText) {
+      if (response.status === 404) {
+        errorMsg = "API route not found (404). Please restart your backend server (npm run server).";
+      } else if (data.rawText.includes("<!DOCTYPE") || data.rawText.includes("<html")) {
+        errorMsg = `Server error (${response.status}). Please ensure backend server is running.`;
+      } else {
+        errorMsg = data.rawText.slice(0, 150);
+      }
+    }
+    throw new ApiError(errorMsg || `Request failed with status ${response.status}`, response.status, data);
   }
 
   return data;

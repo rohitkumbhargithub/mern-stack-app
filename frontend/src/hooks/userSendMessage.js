@@ -27,13 +27,17 @@ const userSendMessage = () => {
             }
 
             const pollText = options.poll?.question ? `📊 Poll: ${options.poll.question}` : "";
-            const finalMessage = (message && typeof message === 'string' && message.trim()) ? message : (pollText || " ");
+            const hasAttachments = Array.isArray(options.attachments) && options.attachments.length > 0;
+            const finalMessage = (message && typeof message === 'string' && message.trim()) 
+                ? message 
+                : (pollText || (hasAttachments ? "" : " "));
 
             const response = await fetch(`/api/messages/send/${targetConvId}`, {
                 method: "POST",
                 headers,
                 body: JSON.stringify({
                     message: finalMessage,
+                    attachments: options.attachments || undefined,
                     replyTo: options.replyTo,
                     editId: options.editId,
                     isForwarded: options.isForwarded || false,
@@ -42,7 +46,14 @@ const userSendMessage = () => {
                 })
             });
 
-            const data = await response.json();
+            let data;
+            const contentType = response.headers.get("content-type") || "";
+            if (contentType.includes("application/json")) {
+                data = await response.json();
+            } else {
+                const rawText = await response.text();
+                throw new Error(response.status === 404 ? "Message route not found (404). Please restart your backend server." : `Server error (${response.status})`);
+            }
 
             if (data.error) {
                 throw new Error(data.error);
@@ -58,7 +69,8 @@ const userSendMessage = () => {
 
             const messageToStore = {
                 ...data,
-                poll: data.poll || options.poll || undefined
+                poll: data.poll || options.poll || undefined,
+                attachments: data.attachments || options.attachments || []
             };
 
             if (String(targetConvId) === String(selectedConverstion?._id)) {
@@ -70,9 +82,25 @@ const userSendMessage = () => {
             }
 
             if (updateConversation) {
-                updateConversation(targetConvId, {
-                    lastMessage: cleanMessageText(finalMessage),
-                    lastMessageTime: new Date().toISOString()
+                let previewText = cleanMessageText(finalMessage);
+                if (!previewText && hasAttachments) {
+                    const firstAtt = options.attachments[0];
+                    if (options.attachments.length > 1) {
+                        previewText = `📎 ${options.attachments.length} attachments`;
+                    } else {
+                        previewText = firstAtt.type === 'image' 
+                            ? '📷 Photo' 
+                            : firstAtt.type === 'audio' 
+                            ? '🎙️ Voice note' 
+                            : firstAtt.type === 'pdf' 
+                            ? `📄 ${firstAtt.name || 'PDF Document'}` 
+                            : `📎 ${firstAtt.name || 'Attachment'}`;
+                    }
+                }
+                const convIdToUpdate = data.conversationId || targetConvId;
+                updateConversation(convIdToUpdate, {
+                    lastMessage: previewText || "Message",
+                    lastMessageTime: data.createdAt || new Date().toISOString()
                 });
             }
 

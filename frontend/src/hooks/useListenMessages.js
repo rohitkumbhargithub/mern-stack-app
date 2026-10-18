@@ -132,7 +132,12 @@ const useListenMessages = () => {
                     : (conv?.isGroupChat
                         ? `${senderName} in ${conv.name || "Group"}`
                         : senderName);
-                const bodyText = (newMessage.message || newMessage.body || "New message").slice(0, 120);
+                let bodyText = (newMessage.message || newMessage.body || "").trim();
+                if (!bodyText && Array.isArray(newMessage.attachments) && newMessage.attachments.length > 0) {
+                    const firstAtt = newMessage.attachments[0];
+                    bodyText = firstAtt.type === 'image' ? '📷 Photo' : firstAtt.type === 'audio' ? '🎙️ Voice note' : firstAtt.type === 'pdf' ? `📄 PDF: ${firstAtt.name || 'Document'}` : '📎 Attachment';
+                }
+                bodyText = (bodyText || "New message").slice(0, 120);
 
                 // Ensure icon is a valid image URL, otherwise generate the Text/Initials avatar like in the sidebar
                 const isValidUrl = (u) => typeof u === 'string' && (
@@ -231,8 +236,23 @@ const useListenMessages = () => {
         // Update last message preview in conversations list
         if (newMessage.conversationId) {
             const rawMsg = newMessage.message || newMessage.body || "";
+            let preview = cleanMessageText(rawMsg);
+            if (!preview && Array.isArray(newMessage.attachments) && newMessage.attachments.length > 0) {
+                const firstAtt = newMessage.attachments[0];
+                if (newMessage.attachments.length > 1) {
+                    preview = `📎 ${newMessage.attachments.length} attachments`;
+                } else {
+                    preview = firstAtt.type === 'image' 
+                        ? '📷 Photo' 
+                        : firstAtt.type === 'audio' 
+                        ? '🎙️ Voice note' 
+                        : firstAtt.type === 'pdf' 
+                        ? `📄 ${firstAtt.name || 'PDF Document'}` 
+                        : `📎 ${firstAtt.name || 'Attachment'}`;
+                }
+            }
             updateConversation(newMessage.conversationId, {
-                lastMessage: cleanMessageText(rawMsg),
+                lastMessage: preview || "Message",
                 lastMessageTime: newMessage.createdAt || new Date().toISOString()
             });
         }

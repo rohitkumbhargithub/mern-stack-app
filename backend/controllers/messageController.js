@@ -4,11 +4,13 @@ const { getReceiverSocketIds, io } = require("../socket/socket");
 const { isAIBotId, handleAIBotResponse, getOrCreateAIBotUser } = require("../utils/aiBot");
 const { decrypt } = require("../utils/crypto");
 const { sendPushToUser } = require("../services/pushService");
+const { getLinkPreviewData } = require("../services/linkPreviewService");
+const { uploadBufferToCloudinary, deleteCloudinaryAsset } = require("../services/cloudinaryService");
 
 
 exports.sendMessage = async (req, res) => {
     try {
-        const { message, replyTo, editId, isForwarded, poll, mentions } = req.body;
+        const { message, replyTo, editId, isForwarded, poll, mentions, attachments } = req.body;
         const { id: targetId } = req.params;
         const senderId = req.user._id;
         const userApiKey = req.headers["x-gemini-api-key"] || (req.user?.aiSettings?.geminiApiKey ? decrypt(req.user.aiSettings.geminiApiKey) : null);
@@ -51,6 +53,11 @@ exports.sendMessage = async (req, res) => {
         const rawText = typeof message === "string" ? message : "";
         const pollText = poll && poll.question ? `📊 Poll: ${poll.question}` : rawText;
 
+        // Clean & validate attachments if provided
+        const cleanAttachments = Array.isArray(attachments)
+            ? attachments.filter(att => att && typeof att.url === "string" && att.url.trim().length > 0)
+            : [];
+
         // Extract and resolve tagged / mentioned user IDs
         let mentionUserIds = Array.isArray(mentions) ? mentions.map(String) : [];
         if (rawText.toLowerCase().includes("@everyone") && conversation.participated) {
@@ -66,7 +73,8 @@ exports.sendMessage = async (req, res) => {
         const newMessage = new Message({
             senderId,
             conversationId: conversation._id,
-            message: pollText || " ",
+            message: pollText || (cleanAttachments.length > 0 ? (rawText || "") : (rawText || " ")),
+            attachments: cleanAttachments,
             replyTo: replyTo || undefined,
             isForwarded: Boolean(isForwarded),
             mentions: mentionUserIds,
@@ -111,7 +119,22 @@ exports.sendMessage = async (req, res) => {
         // --- Web Push Notifications ---
         // Send push to all participants EXCEPT the sender (non-blocking)
         const senderName = req.user?.name || "Someone";
-        const contentForPush = pollText || rawText || "New message";
+        let contentForPush = pollText || rawText;
+        if (!contentForPush && cleanAttachments.length > 0) {
+            if (cleanAttachments.length === 1) {
+                const att = cleanAttachments[0];
+                if (att.type === 'image') contentForPush = '📷 Photo';
+                else if (att.type === 'audio') contentForPush = '🎙️ Voice note';
+                else if (att.type === 'pdf') contentForPush = `📄 PDF: ${att.name || 'Document'}`;
+                else if (att.type === 'video') contentForPush = '🎥 Video';
+                else contentForPush = `📎 File: ${att.name || 'Attachment'}`;
+            } else {
+                contentForPush = `📎 ${cleanAttachments.length} attachments`;
+            }
+        }
+        if (!contentForPush) {
+            contentForPush = "New message";
+        }
         const previewText = contentForPush.length > 80 ? contentForPush.substring(0, 80) + "…" : contentForPush;
         const conversationUrl = `/chat/${conversation._id}`;
 
@@ -261,6 +284,22 @@ exports.deleteMessage = async (req, res) => {
         message.isDeleted = true;
         await message.save();
 
+        // Clean up Cloudinary storage asynchronously in background (non-blocking)
+        if (Array.isArray(message.attachments) && message.attachments.length > 0) {
+            message.attachments.forEach(att => {
+                if (att && att.publicId) {
+                    const resourceType = (att.type === 'audio' || att.type === 'video')
+                        ? 'video'
+                        : (att.type === 'pdf' || att.type === 'document')
+                            ? 'raw'
+                            : 'image';
+                    deleteCloudinaryAsset(att.publicId, resourceType).catch(err => {
+                        console.error('deleteCloudinaryAsset error:', err.message);
+                    });
+                }
+            });
+        }
+
         // Socket notification
         const conversation = await Converastion.findById(message.conversationId);
         if (conversation) {
@@ -369,5 +408,63 @@ exports.reactMessage = async (req, res) => {
     } catch (err) {
         console.error("reactMessage error:", err);
         res.status(500).json({ error: err.message || "Internal server error" });
+    }
+};
+
+exports.getLinkPreview = async (req, res) => {
+    try {
+        const url = req.query.url || req.body?.url;
+        if (!url) {
+            return res.status(400).json({ error: "URL is required" });
+        }
+        const data = await getLinkPreviewData(url);
+        return res.status(200).json(data);
+    } catch (err) {
+        return res.status(400).json({ error: err.message || "Failed to load link preview" });
+    }
+};
+
+exports.uploadFiles = async (req, res) => {
+    try {
+        if (!req.files || !Array.isArray(req.files) || req.files.length === 0) {
+            return res.status(400).json({ error: "No files uploaded" });
+        }
+
+        const uploadPromises = req.files.map(file =>
+            uploadBufferToCloudinary({
+                buffer: file.buffer,
+                originalname: file.originalname,
+                mimetype: file.mimetype,
+                folder: "sendchat/attachments",
+            })
+        );
+
+        const attachments = await Promise.all(uploadPromises);
+        return res.status(200).json({ attachments });
+    } catch (err) {
+        console.error("uploadFiles error:", err);
+        return res.status(500).json({ error: err.message || "Failed to upload files to Cloudinary" });
+    }
+};
+
+exports.uploadVoiceNote = async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: "No voice note audio file uploaded" });
+        }
+
+        const duration = req.body.duration ? parseFloat(req.body.duration) : undefined;
+        const attachment = await uploadBufferToCloudinary({
+            buffer: req.file.buffer,
+            originalname: req.file.originalname || `voice_note_${Date.now()}.webm`,
+            mimetype: req.file.mimetype || "audio/webm",
+            folder: "sendchat/voice_notes",
+            duration: duration,
+        });
+
+        return res.status(200).json({ attachment });
+    } catch (err) {
+        console.error("uploadVoiceNote error:", err);
+        return res.status(500).json({ error: err.message || "Failed to upload voice note to Cloudinary" });
     }
 };

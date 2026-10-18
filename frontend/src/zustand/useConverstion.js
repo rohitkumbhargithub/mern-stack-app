@@ -79,10 +79,27 @@ const useConverstion = create((set) => ({
 
     updateConversation: (conversationId, updates) => set((state) => {
         const idStr = String(conversationId);
-        const nextConversations = state.conversations.map((c) =>
-            String(c._id) === idStr ? { ...c, ...updates } : c
-        );
-        const isCurrentSelected = state.selectedConverstion && String(state.selectedConverstion._id) === idStr;
+        const nextConversations = state.conversations.map((c) => {
+            if (String(c._id) === idStr || (c.userId && String(c.userId) === idStr)) {
+                return { ...c, ...updates };
+            }
+            return c;
+        });
+
+        // Re-sort so active conversation moves to top (keeping AI assistant pinned at very top)
+        if (updates.lastMessageTime) {
+            nextConversations.sort((a, b) => {
+                if (a.isAI) return -1;
+                if (b.isAI) return 1;
+                const timeA = new Date(a.lastMessageTime || 0).getTime();
+                const timeB = new Date(b.lastMessageTime || 0).getTime();
+                return timeB - timeA;
+            });
+        }
+
+        const isCurrentSelected = state.selectedConverstion && 
+            (String(state.selectedConverstion._id) === idStr || (state.selectedConverstion.userId && String(state.selectedConverstion.userId) === idStr));
+
         return {
             conversations: nextConversations,
             ...(isCurrentSelected ? { selectedConverstion: { ...state.selectedConverstion, ...updates } } : {})

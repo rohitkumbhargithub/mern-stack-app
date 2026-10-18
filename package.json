@@ -7,6 +7,8 @@
     "server": "nodemon backend/server.js",
     "client": "npm run dev --prefix frontend",
     "start": "node backend/server.js",
+    "test": "node --test test/*.test.js",
+    "test:brevo": "node test/test-brevo-live.js",
     "build": "npm install && npm install --prefix frontend && npm run build --prefix frontend"
   },
   "keywords": [],
@@ -14,12 +16,14 @@
   "license": "ISC",
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.11.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "dotenv": "^16.4.1",
     "express": "^4.18.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.1.1",
+    "multer": "^2.4.0",
     "nodemailer": "^10.0.13",
     "socket.io": "^4.7.4",
     "web-push": "^3.6.7"

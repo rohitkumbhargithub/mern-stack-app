@@ -1,7 +1,47 @@
 const User = require("../models/users");
 const Converastion = require("../models/converastions");
+const Message = require("../models/messages");
 const { getOrCreateAIBotUser } = require("../utils/aiBot");
 const { encrypt, decrypt, maskApiKey } = require("../utils/crypto");
+
+/**
+ * Format last message text preview for sidebar (supports text, polls, and attachments)
+ */
+const formatLastMessage = (lastMsg, isGroup = false) => {
+    if (!lastMsg) {
+        return isGroup ? "Group created" : "";
+    }
+
+    const text = typeof lastMsg.message === "string" ? lastMsg.message.trim() : "";
+
+    // 1. Polls
+    if (lastMsg.poll && lastMsg.poll.question) {
+        return `📊 Poll: ${lastMsg.poll.question}`;
+    }
+
+    // 2. Attachments (Photos, Voice Notes, PDFs, Documents, Videos)
+    if (Array.isArray(lastMsg.attachments) && lastMsg.attachments.length > 0) {
+        const firstAtt = lastMsg.attachments[0];
+        let label = "📎 Attachment";
+        if (firstAtt.type === "image") label = "📷 Photo";
+        else if (firstAtt.type === "audio") label = "🎙️ Voice note";
+        else if (firstAtt.type === "pdf") label = `📄 ${firstAtt.name || "PDF Document"}`;
+        else if (firstAtt.type === "video") label = "🎥 Video";
+        else if (firstAtt.name) label = `📎 ${firstAtt.name}`;
+
+        if (text) {
+            return `${label} ${text}`;
+        }
+        return lastMsg.attachments.length > 1 ? `📎 ${lastMsg.attachments.length} attachments` : label;
+    }
+
+    // 3. Regular text (strip hidden poll comments if any)
+    if (text) {
+        return text.replace(/<!--\[POLL\]:.*?-->/g, "").trim();
+    }
+
+    return isGroup ? "Group created" : "";
+};
 
 exports.getUsersSildeBar = async (req, res, next) => {
     try {
@@ -14,9 +54,6 @@ exports.getUsersSildeBar = async (req, res, next) => {
             aiConversation = await Converastion.findOne({
                 participated: { $all: [loggedInUserId, aiBot._id] },
                 isGroupChat: false
-            }).populate({
-                path: "messages",
-                options: { sort: { createdAt: -1 }, limit: 1 }
             });
 
             if (!aiConversation) {
@@ -39,14 +76,53 @@ exports.getUsersSildeBar = async (req, res, next) => {
         })
         .populate("participated", "-password -aiSettings")
         .populate("groupAdmin", "-password -aiSettings")
-        .populate({
-            path: "messages",
-            options: { sort: { createdAt: -1 }, limit: 1 }
-        })
         .sort({ updatedAt: -1 });
 
+        const convIds = conversations.map(c => c._id);
+
+        // Fetch the absolute latest active message for each conversation reliably using indexed aggregation
+        const latestMessages = await Message.aggregate([
+            {
+                $match: {
+                    conversationId: { $in: convIds },
+                    isDeleted: { $ne: true }
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: "$conversationId",
+                    message: { $first: "$message" },
+                    attachments: { $first: "$attachments" },
+                    poll: { $first: "$poll" },
+                    createdAt: { $first: "$createdAt" },
+                    senderId: { $first: "$senderId" }
+                }
+            }
+        ]);
+
+        const latestMessageMap = new Map();
+        latestMessages.forEach(m => {
+            if (m && m._id) {
+                latestMessageMap.set(m._id.toString(), m);
+            }
+        });
+
+        // Fallback for any conversations with messages array where aggregation didn't match
+        const missingConvs = conversations.filter(c => !latestMessageMap.has(c._id.toString()) && Array.isArray(c.messages) && c.messages.length > 0);
+        if (missingConvs.length > 0) {
+            const fallbackMsgIds = missingConvs.map(c => c.messages[c.messages.length - 1]).filter(Boolean);
+            if (fallbackMsgIds.length > 0) {
+                const fallbackMessages = await Message.find({ _id: { $in: fallbackMsgIds }, isDeleted: { $ne: true } }).lean();
+                fallbackMessages.forEach(m => {
+                    const cId = (m.conversationId || "").toString();
+                    if (cId) latestMessageMap.set(cId, m);
+                });
+            }
+        }
+
         const sidebarData = conversations.map(conv => {
-            const lastMsg = conv.messages[0];
+            const lastMsg = latestMessageMap.get(conv._id.toString());
 
             if (conv.isGroupChat) {
                 return {
@@ -59,8 +135,8 @@ exports.getUsersSildeBar = async (req, res, next) => {
                     type: "group",
                     participated: conv.participated,
                     membersCount: conv.participated ? conv.participated.length : 0,
-                    lastMessage: lastMsg?.message || lastMsg?.body || "Group created",
-                    lastMessageTime: lastMsg?.createdAt || conv.createdAt
+                    lastMessage: formatLastMessage(lastMsg, true),
+                    lastMessageTime: lastMsg?.createdAt || conv.updatedAt || conv.createdAt
                 };
             }
 
@@ -72,14 +148,18 @@ exports.getUsersSildeBar = async (req, res, next) => {
                 userId: otherUser._id,
                 isGroupChat: false,
                 type: "user",
-                lastMessage: lastMsg?.message || lastMsg?.body || "",
-                lastMessageTime: lastMsg?.createdAt || ""
+                lastMessage: formatLastMessage(lastMsg, false),
+                lastMessageTime: lastMsg?.createdAt || conv.updatedAt || ""
             };
         }).filter(item => item !== null);
 
         // Prepend AI Bot as the first conversation
         if (aiConversation && aiBot) {
-            const aiLastMsg = aiConversation.messages?.[0];
+            const aiLastMsg = await Message.findOne({
+                conversationId: aiConversation._id,
+                isDeleted: { $ne: true }
+            }).sort({ createdAt: -1 }).lean();
+
             const aiItem = {
                 _id: aiConversation._id,
                 userId: aiBot._id,
@@ -90,8 +170,8 @@ exports.getUsersSildeBar = async (req, res, next) => {
                 isAI: true,
                 isGroupChat: false,
                 type: "ai",
-                lastMessage: aiLastMsg?.message || "Hi! I'm your AI assistant. Ask me anything!",
-                lastMessageTime: aiLastMsg?.createdAt || new Date().toISOString()
+                lastMessage: formatLastMessage(aiLastMsg, false) || "Hi! I'm your AI assistant. Ask me anything!",
+                lastMessageTime: aiLastMsg?.createdAt || aiConversation.updatedAt || new Date().toISOString()
             };
             sidebarData.unshift(aiItem);
         }
@@ -735,3 +815,5 @@ exports.updateGroupDetails = async (req, res) => {
         return res.status(500).json({ error: err.message || "Failed to update group" });
     }
 };
+
+exports.formatLastMessage = formatLastMessage;

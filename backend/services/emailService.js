@@ -3,8 +3,9 @@ const nodemailer = require('nodemailer');
 /**
  * Configure standard SMTP transporter
  * Supports:
- * 1. Gmail App Password (SMTP_HOST=smtp.gmail.com)
- * 2. Standard SMTP (Brevo, Mailtrap, SendGrid, Amazon SES)
+ * 1. Brevo SMTP Relay (SMTP_HOST=smtp-relay.brevo.com, port 587)
+ * 2. Gmail App Password (SMTP_HOST=smtp.gmail.com)
+ * 3. Standard SMTP (Mailtrap, SendGrid, Amazon SES)
  */
 const createTransporter = () => {
     const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, GMAIL_USER, GMAIL_PASS } = process.env;
@@ -17,7 +18,7 @@ const createTransporter = () => {
     }
 
     const cleanUser = rawUser.trim();
-    // Google App Passwords often contain spaces (e.g. "wfke iowx nskn fbsz"). Sanitize to 16 continuous chars.
+    // Passwords often contain spaces (e.g. Gmail App Passwords "wfke iowx nskn fbsz"). Sanitize.
     const cleanPass = rawPass.replace(/\s+/g, '').trim();
 
     // If host is Gmail or GMAIL_USER is provided, use nodemailer's dedicated Gmail service profile
@@ -34,12 +35,13 @@ const createTransporter = () => {
         });
     }
 
-    // Standard SMTP (Brevo, Mailtrap, SendGrid, Amazon SES, etc.)
+    // Standard SMTP (Brevo Relay, Mailtrap, SendGrid, Amazon SES, etc.)
     if (SMTP_HOST) {
+        const port = Number(SMTP_PORT) || 587;
         return nodemailer.createTransport({
             host: SMTP_HOST.trim(),
-            port: Number(SMTP_PORT) || 587,
-            secure: Number(SMTP_PORT) === 465,
+            port: port,
+            secure: port === 465,
             auth: {
                 user: cleanUser,
                 pass: cleanPass,
@@ -57,29 +59,151 @@ const createTransporter = () => {
 };
 
 /**
- * Send email via Resend HTTP API (HTTPS port 443 - 100% permitted on Render Free Tier!)
+ * Helper to log actionable troubleshooting tips for Brevo
  */
-const sendViaResend = async ({ email, name, otp, htmlContent }) => {
-    const resendApiKey = process.env.RESEND_API_KEY;
+const logBrevoHelp = (errorMessage = '') => {
+    const msg = String(errorMessage).toLowerCase();
+    console.error('\n' + '═'.repeat(60));
+    console.error('🚨 [BREVO TRANSACTIONAL EMAIL ASSISTANCE]');
+    if (msg.includes('key not found') || msg.includes('unauthorized') || msg.includes('401')) {
+        console.error('   👉 Cause : Invalid or missing Brevo API key.');
+        console.error('   👉 Fix   : Get your free API key at https://app.brevo.com/settings/keys/api');
+        console.error('   👉 Env   : Set BREVO_API_KEY=xkeysib-... in your .env');
+    } else if (msg.includes('sender') || msg.includes('not confirmed') || msg.includes('registered')) {
+        console.error('   👉 Cause : Sender email is not verified in your Brevo account.');
+        console.error('   👉 Fix   : Verify your sender at https://app.brevo.com/senders');
+        console.error('   👉 Env   : Set BREVO_SENDER_EMAIL to your verified Brevo account email.');
+    } else if (msg.includes('credit') || msg.includes('quota') || msg.includes('402')) {
+        console.error('   👉 Cause : Daily free quota reached (300 emails/day).');
+        console.error('   👉 Fix   : Limit resets daily at 00:00 UTC.');
+    } else {
+        console.error(`   👉 Error : ${errorMessage}`);
+        console.error('   👉 Docs  : https://developers.brevo.com/docs/send-a-transactional-email');
+    }
+    console.error('═'.repeat(60) + '\n');
+};
+
+/**
+ * Send email via Brevo (Sendinblue) HTTP API (HTTPS port 443 - 100% permitted on Render Free Tier!)
+ * Free tier offers 300 free emails/day to ANY email address.
+ */
+const sendViaBrevo = async ({ email, name, otp, htmlContent, subject, textContent }) => {
+    const brevoApiKey = (process.env.BREVO_API_KEY || '').trim();
+    if (!brevoApiKey) return null;
+
+    const senderEmail = (
+        process.env.BREVO_SENDER_EMAIL ||
+        process.env.BREVO_SENDER ||
+        process.env.SMTP_USER ||
+        "robitkumbhar956@gmail.com"
+    ).trim();
+
+    const senderName = (
+        process.env.BREVO_SENDER_NAME ||
+        "SendChat Security"
+    ).trim();
+
+    const emailSubject = subject || `🔐 ${otp} is your SendChat verification code`;
+    const emailText = textContent || `Your SendChat verification code is: ${otp}. It expires in 5 minutes. Do not share it with anyone.`;
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let res;
+    try {
+        res = await fetch("https://api.brevo.com/v3/smtp/email", {
+            method: "POST",
+            headers: {
+                "accept": "application/json",
+                "api-key": brevoApiKey,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                sender: { name: senderName, email: senderEmail },
+                to: [{ email: email.trim(), name: (name || "User").trim() }],
+                subject: emailSubject,
+                textContent: emailText,
+                htmlContent: htmlContent
+            }),
+            signal: controller.signal
+        });
+    } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError') {
+            throw new Error("Brevo HTTP request timed out after 10 seconds");
+        }
+        throw fetchErr;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+
+    const responseText = await res.text();
+    let data = {};
+    try {
+        data = responseText ? JSON.parse(responseText) : {};
+    } catch {
+        data = { message: responseText };
+    }
+
+    if (!res.ok) {
+        const errorMsg = data.message || data.error || `Brevo HTTP error ${res.status}`;
+        throw new Error(errorMsg);
+    }
+
+    return {
+        ...data,
+        messageId: data.messageId || data.id,
+    };
+};
+
+/**
+ * Send email via Resend HTTP API (HTTPS port 443 - permitted on Render Free Tier)
+ * Note: Resend Free Tier sandbox (onboarding@resend.dev) only allows sending to the account owner email.
+ */
+const sendViaResend = async ({ email, name, otp, htmlContent, subject, textContent }) => {
+    const resendApiKey = (process.env.RESEND_API_KEY || '').trim();
     if (!resendApiKey) return null;
 
-    const from = process.env.RESEND_FROM || "SendChat Security <onboarding@resend.dev>";
-    const res = await fetch("https://api.resend.com/emails", {
-        method: "POST",
-        headers: {
-            "Authorization": `Bearer ${resendApiKey.trim()}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            from: from,
-            to: [email],
-            subject: `🔐 ${otp} is your SendChat verification code`,
-            text: `Your SendChat verification code is: ${otp}. It expires in 5 minutes. Do not share it with anyone.`,
-            html: htmlContent
-        })
-    });
+    const from = (process.env.RESEND_FROM || "SendChat Security <onboarding@resend.dev>").trim();
+    const emailSubject = subject || `🔐 ${otp} is your SendChat verification code`;
+    const emailText = textContent || `Your SendChat verification code is: ${otp}. It expires in 5 minutes. Do not share it with anyone.`;
 
-    const data = await res.json();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+    let res;
+    try {
+        res = await fetch("https://api.resend.com/emails", {
+            method: "POST",
+            headers: {
+                "Authorization": `Bearer ${resendApiKey}`,
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                from: from,
+                to: [email.trim()],
+                subject: emailSubject,
+                text: emailText,
+                html: htmlContent
+            }),
+            signal: controller.signal
+        });
+    } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError') {
+            throw new Error("Resend HTTP request timed out after 10 seconds");
+        }
+        throw fetchErr;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+
+    const responseText = await res.text();
+    let data = {};
+    try {
+        data = responseText ? JSON.parse(responseText) : {};
+    } catch {
+        data = { message: responseText };
+    }
+
     if (!res.ok) {
         throw new Error(data.message || `Resend HTTP error ${res.status}`);
     }
@@ -87,37 +211,13 @@ const sendViaResend = async ({ email, name, otp, htmlContent }) => {
 };
 
 /**
- * Send email via Brevo (Sendinblue) HTTP API (HTTPS port 443 - 100% permitted on Render Free Tier!)
- */
-const sendViaBrevo = async ({ email, name, otp, htmlContent }) => {
-    const brevoApiKey = process.env.BREVO_API_KEY;
-    if (!brevoApiKey) return null;
-
-    const senderEmail = process.env.BREVO_SENDER || process.env.SMTP_USER || "robitkumbhar956@gmail.com";
-    const res = await fetch("https://api.brevo.com/v3/smtp/email", {
-        method: "POST",
-        headers: {
-            "api-key": brevoApiKey.trim(),
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-            sender: { name: "SendChat Security", email: senderEmail },
-            to: [{ email, name: name || "User" }],
-            subject: `🔐 ${otp} is your SendChat verification code`,
-            textContent: `Your SendChat verification code is: ${otp}. It expires in 5 minutes. Do not share it with anyone.`,
-            htmlContent: htmlContent
-        })
-    });
-
-    const data = await res.json();
-    if (!res.ok) {
-        throw new Error(data.message || `Brevo HTTP error ${res.status}`);
-    }
-    return data;
-};
-
-/**
- * Send 6-digit login OTP email
+ * Send 6-digit signup/login OTP email
+ * Provider strategy:
+ * 1. Brevo HTTP API (Default & recommended: 300 free emails/day to any recipient, port 443)
+ * 2. Brevo SMTP / Standard SMTP (smtp-relay.brevo.com, port 587)
+ * 3. Resend HTTP API (if configured)
+ * 4. Dev / Console fallback (never blocks signup/testing)
+ *
  * @param {Object} params
  * @param {string} params.email - Recipient email
  * @param {string} params.name - User display name
@@ -164,7 +264,7 @@ const sendSignupOtpEmail = async ({ email, name, otp }) => {
         <div class="content">
           <div class="greeting">Hello <strong>${name || 'there'}</strong>,</div>
           <div class="message">
-            We received a verify your email address to create your SendChat account. Use the verification code below to complete sign-in:
+            We received a request to verify your email address for your SendChat account. Use the verification code below to complete sign-up:
           </div>
           <div class="otp-box">
             <div class="otp-code">${otp}</div>
@@ -183,44 +283,28 @@ const sendSignupOtpEmail = async ({ email, name, otp }) => {
     </html>
     `;
 
+    const preferredProvider = (process.env.EMAIL_PROVIDER || 'brevo').toLowerCase().trim();
     let deliveryError = null;
 
-    // 1. Try Resend HTTP API first (Works on Render Free Tier via HTTPS port 443)
-    if (process.env.RESEND_API_KEY) {
-        try {
-            const info = await sendViaResend({ email, name, otp, htmlContent });
-            console.log(`📧 Signup OTP email dispatched via Resend HTTP API to ${email} (ID: ${info.id})`);
-            return { success: true, messageId: info.id, provider: 'resend' };
-        } catch (resendErr) {
-            console.error('⚠️ Resend HTTP API failed:', resendErr.message);
-            if (resendErr.message && (resendErr.message.includes('only send testing emails') || resendErr.message.includes('verify a domain') || resendErr.message.includes('validation_error') || resendErr.message.includes('403'))) {
-                console.error('\n' + '═'.repeat(60));
-                console.error('🚨 [RESEND RESTRICTION - TEST MODE]');
-                console.error(`   Resend test domain (onboarding@resend.dev) ONLY allows sending to your own registered account email (${rawUser || 'your Resend email'}).`);
-                console.error(`   Attempted recipient : ${email}`);
-                console.error('   👉 To send to new emails: Add & verify a domain at https://resend.com/domains');
-                console.error('   👉 Or configure BREVO_API_KEY (free 300 emails/day, no custom domain needed).');
-                console.error('═'.repeat(60) + '\n');
-            }
-            deliveryError = `Resend: ${resendErr.message}`;
-        }
-    }
-
-    // 2. Try Brevo HTTP API (Works on Render Free Tier via HTTPS port 443)
-    if (process.env.BREVO_API_KEY) {
+    // Helper to attempt Brevo HTTP API
+    const tryBrevoApi = async () => {
+        if (!process.env.BREVO_API_KEY) return null;
         try {
             const info = await sendViaBrevo({ email, name, otp, htmlContent });
-            console.log(`📧 Signup OTP email dispatched via Brevo HTTP API to ${email} (ID: ${info.messageId})`);
+            console.log(`📧 OTP email dispatched via Brevo HTTP API to ${email} (Message ID: ${info.messageId})`);
             return { success: true, messageId: info.messageId, provider: 'brevo' };
-        } catch (brevoErr) {
-            console.error('⚠️ Brevo HTTP API failed:', brevoErr.message);
-            deliveryError = `Brevo: ${brevoErr.message}`;
+        } catch (err) {
+            console.error('⚠️ Brevo HTTP API failed:', err.message);
+            logBrevoHelp(err.message);
+            deliveryError = `Brevo: ${err.message}`;
+            return null;
         }
-    }
+    };
 
-    // 3. Fallback to standard SMTP (Gmail / Custom SMTP)
-    const transporter = createTransporter();
-    if (transporter) {
+    // Helper to attempt SMTP (Brevo Relay, Gmail, or Custom SMTP)
+    const trySmtp = async () => {
+        const transporter = createTransporter();
+        if (!transporter) return null;
         try {
             const info = await transporter.sendMail({
                 from: fromAddress,
@@ -229,28 +313,61 @@ const sendSignupOtpEmail = async ({ email, name, otp }) => {
                 text: `Your SendChat verification code is: ${otp}. It expires in 5 minutes. Do not share it with anyone.`,
                 html: htmlContent,
             });
-            console.log(`📧 Login OTP email dispatched successfully to ${email} (Message ID: ${info.messageId})`);
+            console.log(`📧 OTP email dispatched via SMTP to ${email} (Message ID: ${info.messageId})`);
             return { success: true, messageId: info.messageId, provider: 'smtp' };
         } catch (err) {
-            deliveryError = err.message;
-            console.error('\n' + '═'.repeat(60));
-            console.error('❌ [SMTP DISPATCH ERROR] Email delivery failed:');
-            console.error(`   To      : ${email}`);
-            console.error(`   From    : ${fromAddress}`);
-            console.error(`   Reason  : ${deliveryError}`);
-
+            deliveryError = `SMTP: ${err.message}`;
+            console.error('⚠️ SMTP delivery failed:', err.message);
             if (process.env.RENDER) {
-                console.error('\n🚨 [RENDER FREE TIER NOTICE]');
-                console.error('   Render.com blocks outgoing SMTP ports (25, 465, 587) on Free Tier.');
-                console.error('   To receive real emails in your inbox on Render Free Tier:');
-                console.error('   👉 Add RESEND_API_KEY (free from resend.com) in Render Environment variables.');
-                console.error('   OR check your Render Logs below to see the OTP code instantly.');
+                console.error('🚨 [RENDER FREE TIER NOTICE] Outgoing SMTP ports (25, 465, 587) are blocked on Render free tier. Use Brevo HTTP API instead.');
             }
-            console.error('═'.repeat(60) + '\n');
+            return null;
         }
+    };
+
+    // Helper to attempt Resend HTTP API
+    const tryResendApi = async () => {
+        if (!process.env.RESEND_API_KEY) return null;
+        try {
+            const info = await sendViaResend({ email, name, otp, htmlContent });
+            console.log(`📧 OTP email dispatched via Resend HTTP API to ${email} (ID: ${info.id})`);
+            return { success: true, messageId: info.id, provider: 'resend' };
+        } catch (err) {
+            console.error('⚠️ Resend HTTP API failed:', err.message);
+            if (err.message && (err.message.includes('only send testing emails') || err.message.includes('verify a domain'))) {
+                console.error('🚨 [RESEND TEST RESTRICTION] Resend sandbox only sends to account owner email. Switch to Brevo for free sending to any email.');
+            }
+            deliveryError = `Resend: ${err.message}`;
+            return null;
+        }
+    };
+
+    // 1. Try preferred provider first
+    let result = null;
+    if (preferredProvider === 'brevo') {
+        result = await tryBrevoApi();
+        if (!result) result = await trySmtp();
+        if (!result) result = await tryResendApi();
+    } else if (preferredProvider === 'resend') {
+        result = await tryResendApi();
+        if (!result) result = await tryBrevoApi();
+        if (!result) result = await trySmtp();
+    } else if (preferredProvider === 'smtp') {
+        result = await trySmtp();
+        if (!result) result = await tryBrevoApi();
+        if (!result) result = await tryResendApi();
+    } else {
+        // Default cascade: Brevo API -> SMTP -> Resend API
+        result = await tryBrevoApi();
+        if (!result) result = await trySmtp();
+        if (!result) result = await tryResendApi();
     }
 
-    // Console Fallback so user/developer is NEVER locked out of logging in
+    if (result && result.success) {
+        return result;
+    }
+
+    // 4. Console Fallback so developers/users are NEVER locked out of signing up
     console.log('\n' + '═'.repeat(60));
     console.log('🔐 [SENDCHAT SECURITY] SIGNUP VERIFICATION CODE DISPATCH');
     console.log(`👤 Recipient : ${name || 'User'} <${email}>`);
@@ -258,6 +375,8 @@ const sendSignupOtpEmail = async ({ email, name, otp }) => {
     console.log('⏱  Valid For : 5 Minutes (Single-Use)');
     if (deliveryError) {
         console.log(`⚠️  Status    : Delivery failed (${deliveryError.split('\n')[0]}). Used console fallback.`);
+    } else {
+        console.log('💡 Note      : Configure BREVO_API_KEY in .env for real email delivery (300/day free).');
     }
     console.log('═'.repeat(60) + '\n');
 
@@ -267,4 +386,8 @@ const sendSignupOtpEmail = async ({ email, name, otp }) => {
 module.exports = {
     sendSignupOtpEmail,
     sendLoginOtpEmail: sendSignupOtpEmail,
+    sendViaBrevo,
+    sendViaResend,
+    createTransporter,
+    logBrevoHelp,
 };
